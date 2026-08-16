@@ -1,0 +1,1222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dream Memory Console</title>
+<style>
+  :root {
+    --bg:        #0e1015;
+    --panel:     #161a22;
+    --panel-2:   #1c212b;
+    --border:    #272d3a;
+    --text:      #e6e9ef;
+    --muted:     #8b93a7;
+    --dim:       #5d6478;
+    --accent:    #6ea8fe;
+    --add:       #4ade80;
+    --supersede: #fbbf24;
+    --merge:     #38bdf8;
+    --noop:      #6b7280;
+    --pattern:   #c084fc;
+    --danger:    #f87171;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .brand { font-weight: 650; margin-right: 6px; white-space: nowrap; }
+  .brand span { color: var(--accent); }
+
+  input, select, button, textarea {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  input::placeholder, textarea::placeholder { color: var(--dim); }
+  button { cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s; }
+  button:hover { background: #232936; border-color: #39414f; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #08101f; font-weight: 600; }
+  button.primary:hover { background: #86b8ff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .field { display: flex; align-items: center; gap: 5px; }
+  .field label { color: var(--muted); font-size: 12px; }
+  .field input { width: 150px; font-family: var(--mono); font-size: 12px; }
+
+  .status { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .dot.ok  { background: var(--add);    box-shadow: 0 0 7px var(--add); }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 7px var(--danger); }
+
+  .main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .sidebar { flex: 0 0 208px; background: var(--panel); border-right: 1px solid var(--border);
+             display: flex; flex-direction: column; min-height: 0; }
+  .chat    { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .aside   { flex: 0 0 400px; background: var(--panel); border-left: 1px solid var(--border);
+             display: flex; flex-direction: column; min-height: 0; }
+
+  .sec-title {
+    flex: 0 0 auto; padding: 9px 12px; font-size: 11px; font-weight: 700;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--dim);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
+  }
+  .sec-title .spacer { margin-left: auto; }
+
+  .scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+  .scroll::-webkit-scrollbar { width: 9px; }
+  .scroll::-webkit-scrollbar-thumb { background: #2c3342; border-radius: 5px; }
+
+  .session { padding: 9px 12px; border-bottom: 1px solid #1e232e; cursor: pointer;
+             display: flex; align-items: center; gap: 8px; }
+  .session:hover { background: var(--panel-2); }
+  .session.active { background: #1e2635; box-shadow: inset 3px 0 0 var(--accent); }
+  .session .who { font-family: var(--mono); font-size: 12px; }
+  .session .meta { font-size: 11px; color: var(--dim); }
+  .session .kill { margin-left: auto; color: var(--dim); background: none; border: none;
+                   padding: 2px 5px; font-size: 15px; line-height: 1; }
+  .session .kill:hover { color: var(--danger); background: none; }
+  .new-session { padding: 10px 12px; border-top: 1px solid var(--border);
+                 display: flex; flex-direction: column; gap: 7px; }
+  .new-session input { width: 100%; font-family: var(--mono); font-size: 12px; }
+
+  .messages { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .msg-user { align-self: flex-end; max-width: 74%; background: #23406e;
+              border: 1px solid #2f5893; border-radius: 12px 12px 3px 12px; padding: 9px 13px; }
+  .decisions { align-self: flex-start; max-width: 88%; display: flex; flex-direction: column; gap: 7px; }
+
+  .card { background: var(--panel-2); border: 1px solid var(--border);
+          border-left: 3px solid var(--noop); border-radius: 3px 9px 9px 3px; padding: 9px 12px; }
+  .card.ADD { border-left-color: var(--add); }
+  .card.SUPERSEDE { border-left-color: var(--supersede); }
+  .card.MERGE { border-left-color: var(--merge); }
+  .card.NOOP { border-left-color: var(--noop); }
+  .card.PATTERN, .card.SYNTHESIZE { border-left-color: var(--pattern); }
+  .card.ERROR { border-left-color: var(--danger); }
+
+  .tag { display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 700;
+         letter-spacing: .07em; padding: 2px 6px; border-radius: 4px; margin-bottom: 5px; }
+  .tag.ADD { background: rgba(74,222,128,.14); color: var(--add); }
+  .tag.SUPERSEDE { background: rgba(251,191,36,.14); color: var(--supersede); }
+  .tag.MERGE { background: rgba(56,189,248,.14); color: var(--merge); }
+  .tag.NOOP { background: rgba(107,114,128,.18); color: #9aa2b4; }
+  .tag.PATTERN, .tag.SYNTHESIZE { background: rgba(192,132,252,.14); color: var(--pattern); }
+  .tag.ERROR { background: rgba(248,113,113,.14); color: var(--danger); }
+
+  .card .content { margin-bottom: 5px; }
+  .card .why { font-size: 12px; color: var(--muted); }
+  .card .ids { font-size: 11px; color: var(--dim); font-family: var(--mono); margin-top: 5px; }
+  .card .ids b { color: var(--muted); font-weight: 600; }
+
+  .composer { flex: 0 0 auto; border-top: 1px solid var(--border); padding: 11px 14px; background: var(--panel); }
+  .composer .row { display: flex; gap: 8px; }
+  .composer textarea { flex: 1; resize: none; height: 42px; }
+  .hint { margin-top: 7px; font-size: 11px; color: var(--dim); }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { font-size: 11px; padding: 3px 8px; border-radius: 20px; background: var(--panel-2);
+          border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+
+  .tabs { flex: 0 0 auto; display: flex; border-bottom: 1px solid var(--border); }
+  .tab { flex: 1; padding: 9px 4px; text-align: center; font-size: 12px; cursor: pointer;
+         color: var(--muted); background: none; border: none;
+         border-bottom: 2px solid transparent; border-radius: 0; }
+  .tab:hover { background: var(--panel-2); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); background: none; }
+  .tab .count { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+
+  .pane { padding: 11px; display: none; }
+  .pane.active { display: block; }
+
+  .mem { background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px;
+         padding: 9px 11px; margin-bottom: 8px; cursor: pointer; }
+  .mem:hover { border-color: #3a4252; }
+  .mem.superseded, .mem.merged, .mem.expired { opacity: .62; }
+  .mem .head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+  .mem .type { font-family: var(--mono); font-size: 10px; color: var(--dim); }
+  .mem .body { font-size: 13px; }
+  .mem .foot { margin-top: 5px; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+
+  .badge { font-family: var(--mono); font-size: 9px; padding: 1px 5px; border-radius: 3px;
+           background: rgba(107,114,128,.2); color: #9aa2b4; }
+  .badge.active { background: rgba(74,222,128,.14); color: var(--add); }
+  .badge.superseded { background: rgba(251,191,36,.14); color: var(--supersede); }
+  .badge.merged { background: rgba(56,189,248,.14); color: var(--merge); }
+  .badge.pattern { background: rgba(192,132,252,.14); color: var(--pattern); }
+
+  .empty { color: var(--dim); font-size: 12px; text-align: center; padding: 26px 12px; }
+  .toolbar { display: flex; gap: 6px; padding: 9px 11px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .toolbar button { font-size: 12px; padding: 5px 9px; }
+  button.danger { color: var(--danger); border-color: #3d2626; }
+  button.danger:hover { background: #341c1c; border-color: var(--danger); }
+
+  .mem-actions { display: flex; gap: 5px; margin-top: 7px; }
+  .mem-actions button { font-size: 10.5px; padding: 2px 7px; }
+
+  .form-row { margin-bottom: 12px; }
+  .form-row label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .form-row input, .form-row textarea, .form-row select { width: 100%; }
+  .form-row textarea { resize: vertical; min-height: 68px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+  .log { flex: 0 0 auto; background: #0b0d12; border-top: 1px solid var(--border);
+         display: flex; flex-direction: column; max-height: 190px; }
+  .log-body { overflow-y: auto; font-family: var(--mono); font-size: 11px; padding: 6px 0; }
+  .log-row { padding: 3px 14px; display: flex; gap: 9px; cursor: pointer; align-items: baseline; }
+  .log-row:hover { background: #12151d; }
+  .log-row .verb { color: var(--accent); width: 42px; flex: 0 0 auto; }
+  .log-row .path { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log-row .code.ok { color: var(--add); }
+  .log-row .code.bad { color: var(--danger); }
+  .log-row .ms { color: var(--dim); width: 62px; text-align: right; flex: 0 0 auto; }
+  .log-detail { padding: 7px 14px 11px 65px; background: #0e1118; border-top: 1px solid #191d26;
+                white-space: pre-wrap; word-break: break-word; color: var(--muted);
+                max-height: 260px; overflow: auto; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.68); display: none;
+             align-items: center; justify-content: center; z-index: 50; padding: 24px; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 11px;
+           max-width: 780px; width: 100%; max-height: 82vh; display: flex; flex-direction: column; }
+  .modal h2 { margin: 0; padding: 15px 18px; font-size: 15px;
+              border-bottom: 1px solid var(--border); display: flex; align-items: center; }
+  .modal h2 button { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 19px; }
+  .modal .content { padding: 18px; overflow-y: auto; }
+  .modal h3 { font-size: 13px; margin: 20px 0 7px; color: var(--accent); }
+  .modal h3:first-child { margin-top: 0; }
+  .modal p, .modal li { font-size: 13px; color: var(--muted); }
+  .modal code { font-family: var(--mono); font-size: 12px; background: var(--panel-2);
+                padding: 1px 5px; border-radius: 4px; color: var(--text); }
+  .modal table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 9px 0; }
+  .modal th, .modal td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .modal th { color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .modal td:first-child { white-space: nowrap; }
+  .callout { background: var(--panel-2); border-left: 3px solid var(--supersede);
+             padding: 11px 14px; border-radius: 0 7px 7px 0; margin: 12px 0; }
+  .callout p { margin: 0; color: var(--text); font-size: 13px; }
+  .flow { font-family: var(--mono); font-size: 11.5px; color: var(--muted); background: #0b0d12;
+          border: 1px solid var(--border); border-radius: 7px; padding: 12px 14px;
+          white-space: pre; overflow-x: auto; line-height: 1.65; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Dream <span>Memory</span></div>
+  <div class="field"><label>API</label><input id="baseUrl" value="http://localhost:8000" style="width:180px"></div>
+  <div class="field"><label>client</label><input id="clientId" value="client_demo"></div>
+  <div class="field"><label>bot</label><input id="botId" value="bot_demo"></div>
+  <button id="btnHelp">How this works</button>
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">connecting…</span></div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sec-title">Sessions <span class="spacer"></span><span id="sessCount"></span></div>
+    <div class="scroll" id="sessions"></div>
+    <div class="new-session">
+      <input id="newPhone" placeholder="+919000000001" />
+      <button class="primary" id="btnNewSession">New session</button>
+      <div style="font-size:11px;color:var(--dim)">
+        Each phone number is a separate user with its own isolated memory.
+      </div>
+    </div>
+  </div>
+
+  <div class="chat">
+    <div class="sec-title">Conversation <span class="spacer"></span>
+      <span id="activeLabel" style="font-family:var(--mono);font-size:11px;color:var(--muted)"></span>
+    </div>
+    <div class="scroll messages" id="messages"></div>
+    <div class="composer">
+      <div class="row">
+        <textarea id="input" placeholder="Say something a user would say…  (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="primary" id="btnSend">Send</button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="hint"><code>POST /v1/memories</code> — the only write endpoint. It extracts durable
+        facts and decides <b>ADD</b> / <b>SUPERSEDE</b> / <b>MERGE</b> / <b>NOOP</b> for each.</div>
+    </div>
+  </div>
+
+  <div class="aside">
+    <div class="tabs">
+      <button class="tab active" data-pane="active">Active <span class="count" id="cActive"></span></button>
+      <button class="tab" data-pane="history">History <span class="count" id="cHistory"></span></button>
+      <button class="tab" data-pane="patterns">Patterns <span class="count" id="cPatterns"></span></button>
+      <button class="tab" data-pane="audit">Audit <span class="count" id="cAudit"></span></button>
+    </div>
+    <div class="toolbar">
+      <button id="btnRefresh">Refresh</button>
+      <button id="btnAddManual" class="primary">+ Add memory</button>
+      <button id="btnSearch">Search</button>
+      <button id="btnDream">Run Dream</button>
+      <button id="btnStats">Stats</button>
+      <button id="btnTokens">Tokens &amp; cost</button>
+      <button id="btnMetrics">Metrics</button>
+      <button id="btnPurge" class="danger">Erase all</button>
+    </div>
+    <div class="scroll">
+      <div class="pane active" id="pane-active"></div>
+      <div class="pane" id="pane-history"></div>
+      <div class="pane" id="pane-patterns"></div>
+      <div class="pane" id="pane-audit"></div>
+    </div>
+  </div>
+</div>
+
+<div class="log">
+  <div class="sec-title">API calls <span class="spacer"></span>
+    <button id="btnClearLog" style="font-size:11px;padding:2px 8px">clear</button>
+  </div>
+  <div class="log-body" id="logBody"></div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2><span id="modalTitle"></span><button id="btnCloseModal">&times;</button></h2>
+    <div class="content" id="modalBody"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const LS_KEY = "dream.console.sessions.v1";
+
+const state = {
+  sessions: [],
+  activePhone: null,
+  memories: [],
+  audit: [],
+  logs: [],
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (v, d = 2) => (typeof v === "number" ? v.toFixed(d) : v ?? "—");
+
+function scope() {
+  return {
+    clientId: $("clientId").value.trim(),
+    botId: $("botId").value.trim(),
+    phoneNumber: state.activePhone,
+  };
+}
+function scopeQuery(extra = {}) {
+  const s = scope();
+  const p = new URLSearchParams({ clientId: s.clientId, botId: s.botId, phoneNumber: s.phoneNumber });
+  for (const [k, v] of Object.entries(extra)) {
+    if (Array.isArray(v)) v.forEach((i) => p.append(k, i));
+    else if (v != null) p.append(k, v);
+  }
+  return p.toString();
+}
+const activeSession = () => state.sessions.find((s) => s.phone === state.activePhone);
+
+/* ---------- transport: every call is logged, so the UI documents itself ---------- */
+
+async function call(method, path, body) {
+  const base = $("baseUrl").value.replace(/\/+$/, "");
+  const started = performance.now();
+  const entry = { method, path, status: 0, ms: 0, body, response: null, error: null };
+
+  try {
+    const res = await fetch(base + path, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    entry.status = res.status;
+    const text = await res.text();
+    try { entry.response = text ? JSON.parse(text) : null; } catch { entry.response = text; }
+    if (!res.ok) throw new Error(entry.response?.error?.message || `HTTP ${res.status}`);
+    return entry.response;
+  } catch (err) {
+    entry.error = err.message;
+    if (entry.status === 0) entry.error = `${err.message} — is the API running at ${base}?`;
+    throw new Error(entry.error);
+  } finally {
+    entry.ms = Math.round(performance.now() - started);
+    state.logs.unshift(entry);
+    if (state.logs.length > 100) state.logs.pop();
+    renderLog();
+  }
+}
+
+/* One wrapper per endpoint, so the mapping from UI action to API is obvious. */
+const api = {
+  ready:      ()            => call("GET",  "/ready"),
+  metrics:    ()            => call("GET",  "/v1/metrics"),
+  tokens:     ()            => call("GET",  "/v1/metrics/tokens"),
+  add:        (prompt)      => call("POST", "/v1/memories", { prompt, ...scope() }),
+  search:     (query, o)    => call("POST", "/v1/memories/search", { query, ...scope(), ...o }),
+  list:       (p)           => call("GET",  `/v1/memories?${scopeQuery(p)}`),
+  get:        (id)          => call("GET",  `/v1/memories/${id}?${scopeQuery()}`),
+  history:    (id)          => call("GET",  `/v1/memories/${id}/history?${scopeQuery()}`),
+  memAudit:   (id)          => call("GET",  `/v1/memories/${id}/audit?${scopeQuery()}`),
+  auditLog:   (limit = 50)  => call("GET",  `/v1/memories/audit/operations?${scopeQuery({ limit })}`),
+  synthesize: ()            => call("POST", "/v1/dream/synthesize", { ...scope() }),
+  job:        (id)          => call("GET",  `/v1/dream/jobs/${id}?${scopeQuery()}`),
+  jobs:       ()            => call("GET",  `/v1/dream/jobs?${scopeQuery()}`),
+  stats:      ()            => call("GET",  `/v1/dream/stats?${scopeQuery()}`),
+
+  // Manual management — these bypass the Dream reasoner entirely.
+  create:     (fields)      => call("POST", "/v1/memories/manual", { ...fields, ...scope() }),
+  update:     (id, fields)  => call("PATCH", `/v1/memories/${id}`, { ...fields, ...scope() }),
+  forget:     (id, hard)    => call("DELETE", `/v1/memories/${id}?${scopeQuery({ permanent: hard })}`),
+  purge:      ()            => call("DELETE", `/v1/memories?${scopeQuery({ confirm: "ERASE" })}`),
+};
+
+/* ---------- sessions ---------- */
+
+function loadSessions() {
+  try { state.sessions = JSON.parse(localStorage.getItem(LS_KEY)) || []; }
+  catch { state.sessions = []; }
+  if (!state.sessions.length) state.sessions = [{ phone: "+919000000001", messages: [] }];
+  state.activePhone = state.sessions[0].phone;
+}
+const saveSessions = () => localStorage.setItem(LS_KEY, JSON.stringify(state.sessions));
+
+function addSession(phone) {
+  phone = (phone || "").trim();
+  if (!phone) return;
+  if (!phone.startsWith("+")) phone = "+" + phone.replace(/[^\d]/g, "");
+  if (state.sessions.some((s) => s.phone === phone)) return selectSession(phone);
+  state.sessions.push({ phone, messages: [] });
+  saveSessions();
+  selectSession(phone);
+}
+function removeSession(phone) {
+  if (state.sessions.length === 1) return;
+  state.sessions = state.sessions.filter((s) => s.phone !== phone);
+  saveSessions();
+  if (state.activePhone === phone) selectSession(state.sessions[0].phone);
+  else renderSessions();
+}
+function selectSession(phone) {
+  state.activePhone = phone;
+  $("activeLabel").textContent = phone;
+  renderSessions();
+  renderMessages();
+  refreshAll();
+}
+function renderSessions() {
+  $("sessCount").textContent = state.sessions.length;
+  $("sessions").innerHTML = state.sessions.map((s) => `
+    <div class="session ${s.phone === state.activePhone ? "active" : ""}" data-phone="${esc(s.phone)}">
+      <div>
+        <div class="who">${esc(s.phone)}</div>
+        <div class="meta">${s.messages.length} message${s.messages.length === 1 ? "" : "s"}</div>
+      </div>
+      <button class="kill" data-kill="${esc(s.phone)}" title="Remove from this console">&times;</button>
+    </div>`).join("");
+}
+
+/* ---------- chat ---------- */
+
+function renderMessages() {
+  const session = activeSession();
+  const box = $("messages");
+  if (!session || !session.messages.length) {
+    box.innerHTML = `<div class="empty">No messages yet for this user.<br><br>
+      Send a sentence and watch the memory layer decide what to do with it.</div>`;
+    return;
+  }
+
+  box.innerHTML = session.messages.map((m) => {
+    if (m.role === "user") return `<div class="msg-user">${esc(m.text)}</div>`;
+    if (m.role === "error") return `<div class="decisions"><div class="card ERROR">
+      <span class="tag ERROR">ERROR</span><div class="content">${esc(m.text)}</div></div></div>`;
+    if (!m.results.length) return `<div class="decisions"><div class="card NOOP">
+      <span class="tag NOOP">NOTHING STORED</span>
+      <div class="why">No durable fact in that message — greetings, questions and small talk
+      are deliberately not remembered.</div></div></div>`;
+
+    return `<div class="decisions">` + m.results.map((d) => `
+      <div class="card ${esc(d.action)}">
+        <span class="tag ${esc(d.action)}">${esc(d.action)}</span>
+        ${d.content ? `<div class="content">${esc(d.content)}</div>` : ""}
+        <div class="why">${esc(d.reason || "")}</div>
+        ${d.supersededMemoryIds?.length ? `<div class="ids"><b>replaced:</b> ${d.supersededMemoryIds.map(esc).join(", ")}</div>` : ""}
+        ${d.mergedMemoryIds?.length ? `<div class="ids"><b>absorbed:</b> ${d.mergedMemoryIds.map(esc).join(", ")}</div>` : ""}
+        ${d.memoryId ? `<div class="ids">${esc(d.memoryId)}</div>` : ""}
+      </div>`).join("") + `</div>`;
+  }).join("");
+
+  box.scrollTop = box.scrollHeight;
+}
+
+async function send() {
+  const text = $("input").value.trim();
+  if (!text) return;
+  const session = activeSession();
+
+  session.messages.push({ role: "user", text });
+  $("input").value = "";
+  renderMessages(); renderSessions();
+  $("btnSend").disabled = true;
+
+  try {
+    const res = await api.add(text);
+    session.messages.push({ role: "system", results: res.results || [] });
+  } catch (err) {
+    session.messages.push({ role: "error", text: err.message });
+  } finally {
+    $("btnSend").disabled = false;
+    saveSessions(); renderMessages(); refreshAll();
+  }
+}
+
+/* ---------- memory panes ---------- */
+
+function memoryCard(m) {
+  const isPattern = m.memoryType === "pattern";
+  return `
+    <div class="mem ${esc(m.status)}" data-mem="${esc(m.memoryId)}">
+      <div class="head">
+        <span class="badge ${isPattern ? "pattern" : esc(m.status)}">${isPattern ? "pattern" : esc(m.status)}</span>
+        <span class="type">${esc(m.memoryType)}</span>
+        <span class="type">imp ${num(m.importance)}</span>
+        <span class="type">conf ${num(m.confidence)}</span>
+      </div>
+      <div class="body">${esc(m.content)}</div>
+      ${m.supersededBy ? `<div class="foot">replaced by ${esc(m.supersededBy)}</div>` : ""}
+      ${m.mergedInto ? `<div class="foot">merged into ${esc(m.mergedInto)}</div>` : ""}
+      ${m.sourceMemoryIds?.length ? `<div class="foot">from ${m.sourceMemoryIds.length} source(s)</div>` : ""}
+      <div class="mem-actions">
+        ${m.status === "active"
+          ? `<button data-edit="${esc(m.memoryId)}">Edit</button>
+             <button data-forget="${esc(m.memoryId)}">Forget</button>`
+          : ``}
+        <button class="danger" data-erase="${esc(m.memoryId)}">Erase</button>
+      </div>
+    </div>`;
+}
+
+/* ---------- manual create / edit / delete ---------- */
+
+const TYPES = ["profile","preference","goal","fact","event","relationship",
+               "constraint","skill","project","behavior","other"];
+
+function memoryForm(m = {}) {
+  return `
+    <div class="form-row">
+      <label>Content — write it in the third person, as the extractor would</label>
+      <textarea id="fContent" placeholder="User is allergic to peanuts.">${esc(m.content || "")}</textarea>
+    </div>
+    <div class="form-grid">
+      <div class="form-row">
+        <label>Type</label>
+        <select id="fType">${TYPES.map((t) =>
+          `<option value="${t}" ${m.memoryType === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+      </div>
+      <div class="form-row">
+        <label>Temporal nature</label>
+        <select id="fTemporal">${["current","permanent","temporary","historical","future"].map((t) =>
+          `<option value="${t}" ${m.temporalNature === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+      </div>
+      <div class="form-row">
+        <label>Importance (0–1) — how much it should shape answers</label>
+        <input id="fImportance" type="number" min="0" max="1" step="0.05" value="${m.importance ?? 0.6}">
+      </div>
+      <div class="form-row">
+        <label>Confidence (0–1) — how sure we are it is true</label>
+        <input id="fConfidence" type="number" min="0" max="1" step="0.05" value="${m.confidence ?? 1.0}">
+      </div>
+    </div>`;
+}
+
+function readMemoryForm() {
+  return {
+    content: $("fContent").value.trim(),
+    memoryType: $("fType").value,
+    temporalNature: $("fTemporal").value,
+    importance: parseFloat($("fImportance").value),
+    confidence: parseFloat($("fConfidence").value),
+  };
+}
+
+function openCreate() {
+  showModal("Add a memory manually", `
+    <p><code>POST /v1/memories/manual</code> — writes exactly what you type. No extraction,
+    no Dream reasoning, and the sensitivity policy does not apply: you have stated precisely
+    what you want stored, so there is nothing to infer.</p>
+    ${memoryForm()}
+    <div class="modal-actions">
+      <button id="fCancel">Cancel</button>
+      <button class="primary" id="fSave">Create memory</button>
+    </div>`);
+
+  $("fCancel").onclick = closeModal;
+  $("fSave").onclick = async () => {
+    const fields = readMemoryForm();
+    if (!fields.content) return;
+    $("fSave").disabled = true;
+    try {
+      await api.create(fields);
+      closeModal();
+      await refreshAll();
+    } catch (err) {
+      showModal("Error", `<p>${esc(err.message)}</p>`);
+    }
+  };
+}
+
+async function openEdit(id) {
+  try {
+    const detail = await api.get(id);
+    const m = detail.memory;
+
+    showModal("Edit memory", `
+      <p><code>PATCH /v1/memories/${esc(id)}</code> — corrects the record in place, keeping the
+      same id. Deliberately not a supersede: you are fixing a mistake, not recording that the
+      user's situation changed.</p>
+      ${memoryForm(m)}
+      <div class="modal-actions">
+        <button id="fCancel">Cancel</button>
+        <button class="primary" id="fSave">Save changes</button>
+      </div>`);
+
+    $("fCancel").onclick = closeModal;
+    $("fSave").onclick = async () => {
+      $("fSave").disabled = true;
+      try {
+        await api.update(id, readMemoryForm());
+        closeModal();
+        await refreshAll();
+      } catch (err) {
+        showModal("Error", `<p>${esc(err.message)}</p>`);
+      }
+    };
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+function confirmForget(id, hard) {
+  showModal(hard ? "Erase this memory permanently?" : "Forget this memory?", `
+    ${hard
+      ? `<p><code>DELETE /v1/memories/${esc(id)}?permanent=true</code></p>
+         <div class="callout"><p><b>Irreversible.</b> The row and every edge touching it are
+         removed from the database. Use this only for data that must not exist — a captured
+         secret, or an erasure request.</p></div>`
+      : `<p><code>DELETE /v1/memories/${esc(id)}</code></p>
+         <p>The memory moves to <code>expired</code> and leaves the search index, so it stops
+         influencing answers. The row is <b>kept</b> and stays auditable — this is the
+         reversible one, and what "forget that" should normally mean.</p>`}
+    <div class="modal-actions">
+      <button id="fCancel">Cancel</button>
+      <button class="${hard ? "danger" : "primary"}" id="fConfirm">
+        ${hard ? "Erase permanently" : "Forget it"}</button>
+    </div>`);
+
+  $("fCancel").onclick = closeModal;
+  $("fConfirm").onclick = async () => {
+    $("fConfirm").disabled = true;
+    try {
+      await api.forget(id, hard);
+      closeModal();
+      await refreshAll();
+    } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+  };
+}
+
+function confirmPurge() {
+  showModal("Erase everything for this user?", `
+    <p><code>DELETE /v1/memories?confirm=ERASE</code></p>
+    <div class="callout"><p><b>Irreversible.</b> Deletes every memory, relationship, audit
+    record and Dream job for <code>${esc(state.activePhone)}</code>.</p></div>
+    <p>The audit trail goes too. Keeping "we decided to store X about this user" after deleting
+    X would defeat the point of an erasure request.</p>
+    <p>Other users are untouched.</p>
+    <div class="modal-actions">
+      <button id="fCancel">Cancel</button>
+      <button class="danger" id="fConfirm">Erase all memory</button>
+    </div>`);
+
+  $("fCancel").onclick = closeModal;
+  $("fConfirm").onclick = async () => {
+    $("fConfirm").disabled = true;
+    try {
+      const res = await api.purge();
+      closeModal();
+      await refreshAll();
+      showModal("Erased", `<table>
+        <tr><th>memories</th><td>${res.deletedMemories}</td></tr>
+        <tr><th>relationships</th><td>${res.deletedRelations}</td></tr>
+        <tr><th>audit records</th><td>${res.deletedOperations}</td></tr>
+        <tr><th>dream jobs</th><td>${res.deletedJobs}</td></tr></table>`);
+    } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+  };
+}
+
+async function refreshAll() {
+  if (!state.activePhone) return;
+  try {
+    const all = await api.list({ status: ["active", "superseded", "merged", "expired"], limit: 200 });
+    state.memories = all.memories || [];
+  } catch { state.memories = []; }
+  try {
+    state.audit = (await api.auditLog(50)).operations || [];
+  } catch { state.audit = []; }
+  renderPanes();
+}
+
+function renderPanes() {
+  const active   = state.memories.filter((m) => m.status === "active" && m.memoryType !== "pattern");
+  const history  = state.memories.filter((m) => m.status !== "active");
+  const patterns = state.memories.filter((m) => m.memoryType === "pattern");
+
+  $("cActive").textContent   = active.length   || "";
+  $("cHistory").textContent  = history.length  || "";
+  $("cPatterns").textContent = patterns.length || "";
+  $("cAudit").textContent    = state.audit.length || "";
+
+  $("pane-active").innerHTML = active.length
+    ? active.map(memoryCard).join("")
+    : `<div class="empty">No memories yet.<br><br>Try<br><em>"I live in Chennai and I work at Acme."</em></div>`;
+
+  $("pane-history").innerHTML = history.length
+    ? `<div style="font-size:11px;color:var(--dim);margin-bottom:10px">
+        Nothing is ever deleted. Replaced and consolidated memories are kept here,
+        each pointing at whatever took its place.</div>` + history.map(memoryCard).join("")
+    : `<div class="empty">No history yet.<br><br>Contradict something you already said — the old
+        memory moves here instead of being deleted.</div>`;
+
+  $("pane-patterns").innerHTML = patterns.length
+    ? patterns.map(memoryCard).join("")
+    : `<div class="empty">No patterns yet.<br><br>Patterns are written by <b>Run Dream</b>,
+        which needs at least 20 memories for this user.</div>`;
+
+  $("pane-audit").innerHTML = state.audit.length
+    ? state.audit.map((op) => `
+        <div class="card ${esc(op.action)}" style="margin-bottom:8px">
+          <span class="tag ${esc(op.action)}">${esc(op.action)}</span>
+          <div class="why">${esc(op.reason)}</div>
+          ${op.validationNotes?.length
+            ? `<div class="ids"><b>backend overrode the model:</b> ${op.validationNotes.map(esc).join("; ")}</div>` : ""}
+          <div class="ids">${esc(op.model || "")}</div>
+        </div>`).join("")
+    : `<div class="empty">No decisions recorded yet.</div>`;
+}
+
+/* ---------- modal ---------- */
+
+function showModal(title, html) {
+  $("modalTitle").textContent = title;
+  $("modalBody").innerHTML = html;
+  $("overlay").classList.add("show");
+}
+const closeModal = () => $("overlay").classList.remove("show");
+const pre = (o) => `<div class="flow">${esc(JSON.stringify(o, null, 2))}</div>`;
+
+async function openMemory(id) {
+  try {
+    const [detail, chain, ops] = await Promise.all([
+      api.get(id),
+      api.history(id).catch(() => ({ memories: [] })),
+      api.memAudit(id).catch(() => ({ operations: [] })),
+    ]);
+    const m = detail.memory;
+
+    showModal("Memory detail", `
+      <h3>Memory <code>GET /v1/memories/{id}</code></h3>
+      <table>
+        <tr><th>id</th><td><code>${esc(m.memoryId)}</code></td></tr>
+        <tr><th>content</th><td>${esc(m.content)}</td></tr>
+        <tr><th>type</th><td>${esc(m.memoryType)}</td></tr>
+        <tr><th>status</th><td>${esc(m.status)}</td></tr>
+        <tr><th>importance</th><td>${num(m.importance)}</td></tr>
+        <tr><th>confidence</th><td>${num(m.confidence)}</td></tr>
+        <tr><th>explicit</th><td>${m.explicit} ${m.explicit ? "(the user said this)" : "(inferred)"}</td></tr>
+        <tr><th>valid from</th><td>${esc(m.validFrom || "—")}</td></tr>
+        <tr><th>valid until</th><td>${esc(m.validUntil || "still true")}</td></tr>
+        <tr><th>replaced by</th><td>${esc(m.supersededBy || "—")}</td></tr>
+        <tr><th>merged into</th><td>${esc(m.mergedInto || "—")}</td></tr>
+      </table>
+
+      <h3>Change history <code>GET /v1/memories/{id}/history</code></h3>
+      ${chain.memories?.length
+        ? `<table><tr><th>status</th><th>content</th><th>valid</th></tr>` + chain.memories.map((h) =>
+            `<tr><td>${esc(h.status)}</td><td>${esc(h.content)}</td>
+             <td>${esc((h.validFrom || "").slice(0,10))} → ${esc(h.validUntil ? h.validUntil.slice(0,10) : "now")}</td></tr>`
+          ).join("") + `</table>`
+        : `<p>No earlier versions.</p>`}
+
+      ${detail.sourceMemories?.length
+        ? `<h3>Built from</h3><ul>` + detail.sourceMemories.map((s) => `<li>${esc(s.content)}</li>`).join("") + `</ul>` : ""}
+
+      ${detail.relationships?.length
+        ? `<h3>Relationships</h3><table>` + detail.relationships.map((r) =>
+            `<tr><td><code>${esc(r.relationType)}</code></td><td>${esc(r.content)}</td><td>${esc(r.status)}</td></tr>`
+          ).join("") + `</table>` : ""}
+
+      <h3>Decisions that touched it <code>GET /v1/memories/{id}/audit</code></h3>
+      ${ops.operations?.length
+        ? `<table>` + ops.operations.map((o) =>
+            `<tr><td><code>${esc(o.action)}</code></td><td>${esc(o.reason)}</td></tr>`).join("") + `</table>`
+        : `<p>None recorded.</p>`}
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+/* ---------- toolbar ---------- */
+
+async function doSearch() {
+  const query = prompt("Search this user's memories:", "Where does the user live?");
+  if (!query) return;
+  try {
+    const [now, all] = await Promise.all([
+      api.search(query, { limit: 10, latestOnly: true }),
+      api.search(query, { limit: 10, latestOnly: false, includeSuperseded: true }),
+    ]);
+    const table = (rows) => rows.length
+      ? `<table><tr><th>score</th><th>status</th><th>memory</th></tr>` + rows.map((m) =>
+          `<tr><td><code>${num(m.score, 3)}</code></td><td>${esc(m.status)}</td><td>${esc(m.content)}</td></tr>`
+        ).join("") + `</table>`
+      : `<p>Nothing matched.</p>`;
+
+    showModal("Search", `
+      <p><code>POST /v1/memories/search</code> — hybrid ranking: similarity blended with
+      importance, confidence, recency and status.</p>
+      <h3>latestOnly: true — what is true now</h3>${table(now.memories)}
+      <h3>latestOnly: false — including replaced history</h3>${table(all.memories)}
+      <div class="callout"><p>Replaced memories stay searchable but are demoted, so the current
+      answer wins even when the old one is worded closer to your question.</p></div>
+      <h3>Score breakdown of the top hit</h3>
+      ${now.memories[0] ? pre(now.memories[0].scoreBreakdown) : "<p>—</p>"}
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+async function doDream() {
+  showModal("Dream — synthesis", `<p>Queueing…</p>`);
+  try {
+    let job = await api.synthesize();
+    const deadline = Date.now() + 300000;
+    while (!["completed", "failed", "skipped"].includes(job.status) && Date.now() < deadline) {
+      $("modalBody").innerHTML = `<p>Job <code>${esc(job.jobId)}</code> — ${esc(job.status)}…</p>
+        <p style="color:var(--dim)">Reading across every memory, clustering, then writing patterns.
+        Runs on the background worker.</p>`;
+      await new Promise((r) => setTimeout(r, 2000));
+      job = await api.job(job.jobId);
+    }
+    await refreshAll();
+    const patterns = state.memories.filter((m) => m.memoryType === "pattern");
+
+    showModal("Dream — synthesis", `
+      <p><code>POST /v1/dream/synthesize</code> → queued to Redis → picked up by the ARQ worker.</p>
+      <h3>Result</h3>
+      <table>
+        <tr><th>status</th><td>${esc(job.status)}</td></tr>
+        <tr><th>memories analysed</th><td>${job.memoriesAnalyzed}</td></tr>
+        <tr><th>clusters</th><td>${job.clustersEvaluated}</td></tr>
+        <tr><th>patterns created</th><td>${job.patternsCreated}</td></tr>
+        <tr><th>patterns updated</th><td>${job.patternsUpdated}</td></tr>
+        <tr><th>patterns skipped</th><td>${job.patternsSkipped}</td></tr>
+        <tr><th>duration</th><td>${job.durationMs ? Math.round(job.durationMs) + " ms" : "—"}</td></tr>
+      </table>
+      ${job.error ? `<div class="callout"><p>${esc(job.error)}</p></div>` : ""}
+      ${patterns.length ? `<h3>Patterns</h3>` + patterns.map((p) =>
+        `<div class="card PATTERN" style="margin-bottom:8px"><div class="content">${esc(p.content)}</div>
+         <div class="ids">derived from ${p.sourceMemoryIds?.length || 0} memories</div></div>`).join("") : ""}
+      <div class="callout"><p>Run it again — the count will not change. Synthesis is idempotent:
+      it checks both source overlap and semantic similarity before creating anything.</p></div>
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+async function doStats() {
+  try {
+    const [stats, jobs] = await Promise.all([api.stats(), api.jobs().catch(() => ({ jobs: [] }))]);
+    showModal("Stats", `
+      <p><code>GET /v1/dream/stats</code></p>
+      <h3>Memories by status</h3>${pre(stats.counts)}
+      <h3>Decisions taken</h3>${pre(stats.actions)}
+      <div class="callout"><p>All <code>NOOP</code> means the thresholds are too strict. All
+      <code>ADD</code> means consolidation is not firing. This tally is the first place to look
+      when tuning.</p></div>
+      <h3>Recent Dream jobs <code>GET /v1/dream/jobs</code></h3>
+      ${jobs.jobs?.length
+        ? `<table><tr><th>job</th><th>status</th><th>patterns</th></tr>` + jobs.jobs.slice(0,8).map((j) =>
+            `<tr><td><code>${esc(j.jobId)}</code></td><td>${esc(j.status)}</td><td>${j.patternsCreated}</td></tr>`
+          ).join("") + `</table>`
+        : `<p>None yet.</p>`}
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+async function doTokens() {
+  try {
+    const [report, stats] = await Promise.all([api.tokens(), api.stats()]);
+    const t = report.totals;
+    const money = (v) => `${(v ?? 0).toFixed(6)} ${report.pricing?.currency || ""}`;
+
+    // Cost per operation is what actually answers "is this affordable?".
+    const perAdd = stats.actions
+      ? Object.entries(stats.actions).reduce((a, [, n]) => a + n, 0)
+      : 0;
+
+    showModal("Tokens & cost", `
+      <p><code>GET /v1/metrics/tokens</code> — spend since this API process started.
+      Input and output are counted separately because they are priced separately,
+      usually with output several times more expensive.</p>
+
+      <h3>This process, by operation</h3>
+      <table>
+        <tr><th>operation</th><th>LLM calls</th><th>input</th><th>output</th>
+            <th>embedding</th><th>est. cost</th></tr>
+        ${report.byOperation.map((r) => `<tr>
+            <td><code>${esc(r.operation)}</code></td>
+            <td>${r.llmCalls}</td>
+            <td>${r.inputTokens.toLocaleString()}</td>
+            <td>${r.outputTokens.toLocaleString()}</td>
+            <td>${r.embeddingTokens.toLocaleString()}</td>
+            <td>${r.estimatedCost !== undefined ? money(r.estimatedCost) : "—"}</td>
+          </tr>`).join("")}
+        <tr>
+            <td><b>total</b></td><td><b>${t.llmCalls}</b></td>
+            <td><b>${t.inputTokens.toLocaleString()}</b></td>
+            <td><b>${t.outputTokens.toLocaleString()}</b></td>
+            <td><b>${t.embeddingTokens.toLocaleString()}</b></td>
+            <td><b>${t.estimatedCost !== undefined ? money(t.estimatedCost) : "—"}</b></td>
+        </tr>
+      </table>
+
+      <h3>What each operation is</h3>
+      <table>
+        <tr><td><code>extract</code></td><td>Pulling durable facts out of a message. One LLM call per message.</td></tr>
+        <tr><td><code>decide</code></td><td>ADD / SUPERSEDE / MERGE / NOOP. One LLM call per extracted fact — skipped entirely when nothing related exists, or on an exact duplicate.</td></tr>
+        <tr><td><code>remember</code></td><td>Embedding a memory on the way in. No LLM.</td></tr>
+        <tr><td><code>search</code></td><td>Embedding a search query. <b>No LLM at all</b> — searching is cheap.</td></tr>
+        <tr><td><code>manual</code></td><td>Manually created or edited memory. Embedding only.</td></tr>
+        <tr><td><code>synthesize</code></td><td>Run Dream. One LLM call per cluster.</td></tr>
+      </table>
+
+      <div class="callout"><p><b>Delete costs nothing.</b> Forget and Erase are pure
+      database operations — no model, no embedding. Search costs one small embedding
+      and no LLM call.</p></div>
+
+      <h3>This user (${esc(state.activePhone)}), from the audit log</h3>
+      <p>Durable and per-user, unlike the figures above: summed from the audit row
+      each decision wrote, so it survives restarts.</p>
+      ${stats.tokens ? `<table>
+        <tr><th>action</th><th>operations</th><th>input</th><th>output</th></tr>
+        ${Object.entries(stats.tokens.byAction).map(([action, u]) => `<tr>
+            <td><code>${esc(action)}</code></td><td>${u.operations}</td>
+            <td>${u.inputTokens.toLocaleString()}</td>
+            <td>${u.outputTokens.toLocaleString()}</td></tr>`).join("")}
+        <tr><td><b>total</b></td><td><b>${stats.tokens.totals.operations}</b></td>
+            <td><b>${stats.tokens.totals.inputTokens.toLocaleString()}</b></td>
+            <td><b>${stats.tokens.totals.outputTokens.toLocaleString()}</b></td></tr>
+      </table>
+      <p>Estimated cost for this user:
+         <b>${(stats.tokens.totals.estimatedCost ?? 0).toFixed(6)} ${esc(stats.tokens.currency || "")}</b></p>`
+      : "<p>No usage recorded yet.</p>"}
+
+      ${report.pricing ? `<h3>Rates used</h3>
+      <table>
+        <tr><th>LLM input</th><td>${report.pricing.llmInputPer1M} ${esc(report.pricing.currency)} / 1M tokens</td></tr>
+        <tr><th>LLM output</th><td>${report.pricing.llmOutputPer1M} ${esc(report.pricing.currency)} / 1M tokens</td></tr>
+        <tr><th>Embedding</th><td>${report.pricing.embeddingPer1M} ${esc(report.pricing.currency)} / 1M tokens</td></tr>
+      </table>
+      <div class="callout"><p>${esc(report.pricing.note)}</p></div>` : ""}
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+async function doMetrics() {
+  try {
+    const m = await api.metrics();
+    const counters = Object.entries(m.counters || {})
+      .map(([k, v]) => [k, Object.values(v).reduce((a, b) => a + b, 0)]);
+    const hist = Object.entries(m.histograms || {}).flatMap(([k, v]) =>
+      Object.values(v).map((s) => [k, s.count, Math.round(s.avg), Math.round(s.max)]));
+
+    showModal("Metrics", `
+      <p><code>GET /v1/metrics</code> — process-wide, all users.</p>
+      <h3>Counters</h3><table><tr><th>metric</th><th>total</th></tr>
+        ${counters.map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td>${v}</td></tr>`).join("")}</table>
+      <h3>Latency</h3><table><tr><th>metric</th><th>n</th><th>avg</th><th>max</th></tr>
+        ${hist.map(([k, n, a, x]) => `<tr><td><code>${esc(k)}</code></td><td>${n}</td>
+          <td>${a} ms</td><td>${x} ms</td></tr>`).join("")}</table>
+    `);
+  } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
+}
+
+/* ---------- help ---------- */
+
+const HELP = `
+<h3>What this is</h3>
+<p>A memory layer that maintains itself. A plain vector store just accumulates: tell it you live
+in Chennai, then that you moved to Bangalore, and it holds both — answering with whichever is
+worded closer to your question. This one reasons about each new fact against what it already knows.</p>
+
+<h3>The four outcomes</h3>
+<table>
+  <tr><th>Action</th><th>When</th><th>What happens to the old memory</th></tr>
+  <tr><td><span class="tag ADD">ADD</span></td><td>Genuinely new fact</td><td>—</td></tr>
+  <tr><td><span class="tag SUPERSEDE">SUPERSEDE</span></td><td>Contradicts something stored</td>
+      <td>Kept, status → <code>superseded</code>, points at its replacement</td></tr>
+  <tr><td><span class="tag MERGE">MERGE</span></td><td>Same fact, said better</td>
+      <td>Kept, status → <code>merged</code>, points at the canonical memory</td></tr>
+  <tr><td><span class="tag NOOP">NOOP</span></td><td>Adds nothing</td><td>Unchanged</td></tr>
+</table>
+
+<div class="callout"><p><b>In conversation you never ask for an update or a delete.</b> You send
+what the user said, and the engine works out whether it replaces, enriches, or duplicates what it
+already knows. An "update" is a SUPERSEDE or MERGE, and the old row is kept with a pointer to
+whatever took its place.</p></div>
+
+<h3>Two ways in</h3>
+<table>
+  <tr><th>Path</th><th>Endpoint</th><th>Who decides what is stored</th></tr>
+  <tr><td>Conversational</td><td><code>POST /v1/memories</code></td>
+      <td>The engine — it extracts facts and picks an action</td></tr>
+  <tr><td>Manual</td><td><code>POST /v1/memories/manual</code></td>
+      <td>You — stored verbatim, no LLM, policy does not apply</td></tr>
+</table>
+<p>Use the manual path when you already know exactly what to store: importing profile data, or
+recording something the extraction policy rejected (health details, for instance, are dropped by
+default). <b>+ Add memory</b> in the toolbar.</p>
+
+<h3>Editing and deleting</h3>
+<table>
+  <tr><th>Action</th><th>Endpoint</th><th>Effect</th></tr>
+  <tr><td><b>Edit</b></td><td><code>PATCH /v1/memories/{id}</code></td>
+      <td>Corrects the record in place, same id. Only <code>active</code> memories —
+      history is never rewritten.</td></tr>
+  <tr><td><b>Forget</b></td><td><code>DELETE /v1/memories/{id}</code></td>
+      <td>Status → <code>expired</code>, leaves the search index. Row kept and auditable.
+      Reversible.</td></tr>
+  <tr><td><b>Erase</b></td><td><code>DELETE ...?permanent=true</code></td>
+      <td>Row and its edges removed from the database. Irreversible.</td></tr>
+  <tr><td><b>Erase all</b></td><td><code>DELETE /v1/memories?confirm=ERASE</code></td>
+      <td>Everything for this user, audit trail included. Irreversible.</td></tr>
+</table>
+
+<div class="callout"><p><b>Forget and Erase are deliberately separate.</b> "Stop using this" and
+"destroy this" carry very different risk, and giving them one verb is how data gets lost by
+accident. Reach for Forget by default; Erase only for data that must not exist.</p></div>
+
+<p>Editing is <em>not</em> a supersede, on purpose. An operator fixing a bad extraction is
+correcting a record; a supersede chain would claim the user's situation changed, putting a
+falsehood into the history.</p>
+
+<h3>What happens to your sentence</h3>
+<div class="flow">your sentence
+  ↓
+extraction (LLM)        pull out durable facts, drop small talk
+  ↓
+policy                  confidence / importance floors, sensitivity rules
+  ↓
+exact-duplicate check   hash lookup — no LLM call if you repeat yourself
+  ↓
+embed + find candidates scoped to THIS user only
+  ↓
+decision (LLM)          ADD / SUPERSEDE / MERGE / NOOP
+  ↓
+validation              drop invented ids, protect permanent facts
+  ↓
+state transition        the backend does this, never the model
+  ↓
+vector index + audit log</div>
+
+<h3>Sessions</h3>
+<p>Each phone number is a separate user with completely isolated memory. Same <code>clientId</code>
++ <code>botId</code> + phone = same memory. Change the phone number and you get a different person;
+change the <code>clientId</code> and you get a different tenant — the same phone number then
+resolves to two unrelated identities, and neither can see the other.</p>
+<p>The session list lives in your browser. The memories live in MongoDB.</p>
+
+<h3>Dream (synthesis)</h3>
+<p><b>Run Dream</b> reads across all of a user's memories, clusters them, and writes down patterns
+no single memory states — each with references back to its evidence. Needs at least 20 memories for
+that user. It runs on the background worker, not the API, because it takes seconds. Running it
+repeatedly will not create duplicates.</p>
+
+<h3>What each operation costs</h3>
+<table>
+  <tr><th>Action</th><th>LLM calls</th><th>Embeddings</th></tr>
+  <tr><td>Send a message (new fact)</td><td>2 — extract, then decide</td><td>1</td></tr>
+  <tr><td>Send a message (nothing related yet)</td><td>1 — extract only</td><td>1</td></tr>
+  <tr><td>Send an exact repeat</td><td><b>0</b> — caught by a hash lookup</td><td>0</td></tr>
+  <tr><td>Search</td><td><b>0</b></td><td>1 small query embedding</td></tr>
+  <tr><td>Add / edit manually</td><td><b>0</b></td><td>1</td></tr>
+  <tr><td>Forget / Erase</td><td><b>0</b></td><td>0</td></tr>
+  <tr><td>Run Dream</td><td>1 per cluster</td><td>1 per pattern</td></tr>
+</table>
+<p><b>Tokens &amp; cost</b> in the toolbar shows the real numbers, broken down by
+operation, plus a per-user total taken from the audit log. Input and output are
+reported separately because they are priced separately.</p>
+
+<h3>Every endpoint, and where it is used here</h3>
+<table>
+  <tr><th>Endpoint</th><th>In this UI</th></tr>
+  <tr><td><code>POST /v1/memories</code></td><td>Sending a message</td></tr>
+  <tr><td><code>POST /v1/memories/manual</code></td><td>+ Add memory</td></tr>
+  <tr><td><code>PATCH /v1/memories/{id}</code></td><td>Edit on a memory card</td></tr>
+  <tr><td><code>DELETE /v1/memories/{id}</code></td><td>Forget / Erase on a memory card</td></tr>
+  <tr><td><code>DELETE /v1/memories</code></td><td>Erase all</td></tr>
+  <tr><td><code>POST /v1/memories/search</code></td><td>Search button</td></tr>
+  <tr><td><code>GET /v1/memories</code></td><td>Active / History / Patterns tabs</td></tr>
+  <tr><td><code>GET /v1/memories/{id}</code></td><td>Click any memory</td></tr>
+  <tr><td><code>GET /v1/memories/{id}/history</code></td><td>Memory detail → change history</td></tr>
+  <tr><td><code>GET /v1/memories/{id}/audit</code></td><td>Memory detail → decisions</td></tr>
+  <tr><td><code>GET /v1/memories/audit/operations</code></td><td>Audit tab</td></tr>
+  <tr><td><code>POST /v1/dream/synthesize</code></td><td>Run Dream</td></tr>
+  <tr><td><code>GET /v1/dream/jobs/{id}</code></td><td>Run Dream — polling</td></tr>
+  <tr><td><code>GET /v1/dream/jobs</code></td><td>Stats</td></tr>
+  <tr><td><code>GET /v1/dream/stats</code></td><td>Stats</td></tr>
+  <tr><td><code>GET /v1/metrics</code></td><td>Metrics</td></tr>
+  <tr><td><code>GET /v1/metrics/tokens</code></td><td>Tokens &amp; cost</td></tr>
+  <tr><td><code>GET /ready</code></td><td>Status light, top right</td></tr>
+</table>
+<p>The <b>API calls</b> strip at the bottom logs every request — click a row to see the exact JSON
+sent and received.</p>
+
+<h3>Try this in order</h3>
+<ol>
+  <li><em>"I live in Chennai and I work at Acme as a backend engineer."</em> → two ADDs</li>
+  <li><em>"I moved to Bangalore last month."</em> → SUPERSEDE; now open the History tab</li>
+  <li>Send that same sentence again → NOOP, an exact duplicate costs no LLM call</li>
+  <li><em>"I'm based in Bangalore, in Indiranagar."</em> → MERGE into a richer memory</li>
+  <li>Search "where does the user live" and compare the two result sets</li>
+</ol>
+`;
+
+/* ---------- api log ---------- */
+
+function renderLog() {
+  $("logBody").innerHTML = state.logs.map((e, i) => `
+    <div class="log-row" data-log="${i}">
+      <span class="verb">${esc(e.method)}</span>
+      <span class="path">${esc(e.path)}</span>
+      <span class="code ${e.error ? "bad" : "ok"}">${e.error ? "ERR" : e.status}</span>
+      <span class="ms">${e.ms} ms</span>
+    </div>
+    ${e.expanded ? `<div class="log-detail">${esc(
+      (e.body ? "REQUEST\n" + JSON.stringify(e.body, null, 2) + "\n\n" : "") +
+      "RESPONSE\n" + (e.error ? e.error : JSON.stringify(e.response, null, 2)))}</div>` : ""}
+  `).join("");
+}
+
+/* ---------- status ---------- */
+
+async function ping() {
+  try {
+    const ready = await api.ready();
+    const ok = ready.status === "ok";
+    $("dot").className = "dot " + (ok ? "ok" : "bad");
+    $("statusText").textContent = ok ? (ready.checks?.llm?.model || "connected") : "degraded";
+  } catch {
+    $("dot").className = "dot bad";
+    $("statusText").textContent = "offline — start the API";
+  }
+}
+
+/* ---------- wiring ---------- */
+
+const SAMPLES = [
+  "I live in Chennai and I work at Acme as a backend engineer.",
+  "I moved to Bangalore last month.",
+  "I prefer morning meetings before 10 AM.",
+  "I'm based in Bangalore, in the Indiranagar area.",
+  "Hi there!",
+];
+
+function init() {
+  loadSessions();
+  renderSessions();
+  renderMessages();
+  $("activeLabel").textContent = state.activePhone;
+
+  $("chips").innerHTML = SAMPLES.map((s) =>
+    `<span class="chip" data-sample="${esc(s)}">${esc(s.length > 42 ? s.slice(0,42) + "…" : s)}</span>`).join("");
+
+  $("btnSend").onclick = send;
+  $("input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  $("chips").addEventListener("click", (e) => {
+    const s = e.target.dataset.sample;
+    if (s) { $("input").value = s; $("input").focus(); }
+  });
+
+  $("btnNewSession").onclick = () => { addSession($("newPhone").value); $("newPhone").value = ""; };
+  $("newPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btnNewSession").click(); });
+  $("sessions").addEventListener("click", (e) => {
+    const kill = e.target.dataset.kill;
+    if (kill) { e.stopPropagation(); return removeSession(kill); }
+    const row = e.target.closest("[data-phone]");
+    if (row) selectSession(row.dataset.phone);
+  });
+
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.onclick = () => {
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      document.querySelectorAll(".pane").forEach((p) => p.classList.remove("active"));
+      tab.classList.add("active");
+      $("pane-" + tab.dataset.pane).classList.add("active");
+    };
+  });
+  document.querySelectorAll(".pane").forEach((pane) => {
+    pane.addEventListener("click", (e) => {
+      // Action buttons take precedence over opening the detail view.
+      const edit   = e.target.dataset.edit;
+      const forget = e.target.dataset.forget;
+      const erase  = e.target.dataset.erase;
+      if (edit)   { e.stopPropagation(); return openEdit(edit); }
+      if (forget) { e.stopPropagation(); return confirmForget(forget, false); }
+      if (erase)  { e.stopPropagation(); return confirmForget(erase, true); }
+
+      const card = e.target.closest("[data-mem]");
+      if (card) openMemory(card.dataset.mem);
+    });
+  });
+
+  $("btnRefresh").onclick   = refreshAll;
+  $("btnAddManual").onclick = openCreate;
+  $("btnSearch").onclick    = doSearch;
+  $("btnDream").onclick     = doDream;
+  $("btnStats").onclick     = doStats;
+  $("btnTokens").onclick    = doTokens;
+  $("btnMetrics").onclick   = doMetrics;
+  $("btnPurge").onclick     = confirmPurge;
+  $("btnHelp").onclick      = () => showModal("How this works", HELP);
+
+  $("btnCloseModal").onclick = closeModal;
+  $("overlay").addEventListener("click", (e) => { if (e.target === $("overlay")) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+  $("btnClearLog").onclick = () => { state.logs = []; renderLog(); };
+  $("logBody").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-log]");
+    if (!row) return;
+    const entry = state.logs[+row.dataset.log];
+    entry.expanded = !entry.expanded;
+    renderLog();
+  });
+
+  [$("baseUrl"), $("clientId"), $("botId")].forEach((el) =>
+    el.addEventListener("change", () => { ping(); refreshAll(); }));
+
+  ping();
+  setInterval(ping, 15000);
+  refreshAll();
+}
+
+init();
+</script>
+</body>
+</html>

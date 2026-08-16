@@ -1,0 +1,135 @@
+# Dream Memory tuning.
+#
+# Loaded when DREAM_CONFIG_FILE points at this file. Environment variables
+# override anything here (DREAM_RETRIEVAL__TOP_K=20), and this file overrides the
+# defaults in app/core/config.py. Infrastructure settings — connection strings,
+# credentials, provider selection — belong in the environment, not here.
+#
+# Similarity thresholds are MEASURED against Azure OpenAI
+# `text-embedding-3-small` (python -m scripts.calibrate, 27 labelled pairs of
+# short third-person facts):
+#
+#   unrelated       0.16 - 0.36
+#   duplicate       0.46 - 0.87
+#   contradiction   0.57 - 0.91
+#   near-identical  0.94 - 1.00
+#
+# Two things here are counter-intuitive and worth internalising:
+#
+#   * Unrelated text scores up to 0.36. The floor is high, so a threshold that
+#     looks generous can still be under the noise.
+#   * Contradictions score HIGHER than duplicates. "lives in Chennai" versus
+#     "lives in Bangalore" differ by one token and score 0.77, while the
+#     paraphrase "likes black coffee" / "prefers coffee without milk" scores
+#     0.46. Merge therefore cannot use a higher bar than supersede -- the bands
+#     overlap, and telling them apart is the reasoner's job, not the threshold's.
+#
+# These bands move a lot between embedding models. Re-run scripts/calibrate.py
+# before changing model.
+
+retrieval:
+  top_k: 10
+  candidate_multiplier: 4
+  similarity_threshold: 0.30
+  recency_half_life_days: 90.0
+
+  # Need not sum to 1.0 — the ranker normalises.
+  weights:
+    semantic: 0.60
+    importance: 0.15
+    confidence: 0.10
+    recency: 0.10
+    status: 0.05
+
+  # Additive status component of the weighted sum.
+  status_scores:
+    active: 1.0
+    superseded: 0.4
+    merged: 0.3
+    expired: 0.1
+
+  # Multiplicative demotion applied to the final score. This, not the additive
+  # term above, is what keeps a retired fact from outranking the current one
+  # when it happens to be phrased closer to the query. Set all to 1.0 for the
+  # pure additive formula.
+  status_multipliers:
+    active: 1.0
+    superseded: 0.45
+    merged: 0.40
+    expired: 0.25
+
+dream:
+  # unified: one LLM call decides ADD / SUPERSEDE / MERGE / NOOP.
+  # staged:  a merge-focused call then a supersede-focused call, each with its
+  #          dedicated prompt. ~2x the tokens, better on hard cases, easier to
+  #          debug because each call answers one question.
+  decision_mode: unified
+  max_related_candidates: 10
+
+  candidates:
+    # Recent same-type memories always shown alongside vector neighbours.
+    # Cheap insurance: it guarantees the reasoner sees same-type memories even
+    # when phrasing diverges enough to fall under the threshold, and it is what
+    # makes supersede work at all under a weaker or purely lexical embedder.
+    same_type_recent: 5
+    max_total: 12
+
+  supersede:
+    enabled: true
+    # Well below the weakest measured contradiction (0.57).
+    similarity_threshold: 0.40
+    max_candidates: 10
+
+  merge:
+    enabled: true
+    # Just below the weakest measured duplicate (0.46).
+    similarity_threshold: 0.40
+    max_candidates: 10
+    exact_duplicate_shortcut: true
+
+  synthesis:
+    enabled: true
+    min_memories: 20
+    min_cluster_size: 3
+    max_cluster_size: 12
+    # Above the unrelated ceiling (0.36); below the duplicate band.
+    cluster_similarity_threshold: 0.45
+    max_clusters_per_run: 20
+    max_candidates: 200
+
+    # Idempotency guards. Raising these makes duplicate patterns more likely;
+    # lowering them makes genuinely new patterns get swallowed into old ones.
+    duplicate_similarity_threshold: 0.82
+    duplicate_source_overlap: 0.60
+
+    min_pattern_confidence: 0.55
+    min_pattern_importance: 0.40
+
+    # Scheduled sweep across every user (worker only). UTC.
+    schedule_enabled: false
+    schedule_cron: "0 3 * * *"
+
+memory:
+  min_confidence: 0.60
+  min_importance: 0.20
+  # Empty allow-list means no restriction on memory type.
+  allowed_memory_types: []
+  blocked_memory_types: []
+  # Candidates the extractor flags as sensitive (credentials, financial account
+  # detail, government identifiers, health, precise address) are dropped unless
+  # this is explicitly enabled.
+  allow_sensitive: false
+  max_content_chars: 1000
+  max_candidates_per_prompt: 8
+
+llm:
+  temperature: 0.1
+  max_output_tokens: 1200
+  timeout_seconds: 60.0
+  max_retries: 3
+
+embedding:
+  batch_size: 64
+  timeout_seconds: 30.0
+  max_retries: 3
+  max_input_chars: 8000
