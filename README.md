@@ -194,11 +194,6 @@ The fastest way to understand what the system is doing.
 
 ## Use it in your project
 
-### Python SDK
-
-```bash
-pip install memdream
-```
 
 ```python
 from memdream import DreamClient
