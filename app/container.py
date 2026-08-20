@@ -102,7 +102,7 @@ class DreamContainer:
         # The index width comes from the live provider, not from configuration,
         # so an index is always created at the dimension the model returns.
         vectors = vectors or build_vector_store(settings, dimensions=embeddings.dimensions)
-        queue = queue or build_job_queue(settings)
+        queue = queue or build_job_queue(settings, jobs=jobs)
 
         ranker = HybridRanker(settings.retrieval)
         retriever = MemoryRetriever(
@@ -140,7 +140,11 @@ class DreamContainer:
             settings=settings,
         )
         dream_service = DreamService(
-            synthesis=synthesis, jobs=jobs, queue=queue, settings=settings
+            synthesis=synthesis,
+            jobs=jobs,
+            memories=memories,
+            queue=queue,
+            settings=settings,
         )
 
         container = cls(

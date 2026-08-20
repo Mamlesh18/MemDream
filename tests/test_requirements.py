@@ -11,10 +11,10 @@ pyproject.toml is the source of truth. If this fails, fix requirements.txt.
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 

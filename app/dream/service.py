@@ -13,9 +13,11 @@ from app.core.logging import get_logger
 from app.dream.synthesis import SynthesisEngine
 from app.models.dream import DreamJob
 from app.models.enums import JobStatus
+from app.models.memory import utcnow
 from app.models.scope import MemoryScope
 from app.providers.queue.base import JobQueue
 from app.repositories.job_repository import JobRepository
+from app.repositories.memory_repository import MemoryRepository
 
 logger = get_logger(__name__)
 
@@ -26,11 +28,13 @@ class DreamService:
         *,
         synthesis: SynthesisEngine,
         jobs: JobRepository,
+        memories: MemoryRepository,
         queue: JobQueue,
         settings: Settings | None = None,
     ) -> None:
         self._synthesis = synthesis
         self._jobs = jobs
+        self._memories = memories
         self._queue = queue
         self._settings = settings or get_settings()
 
@@ -51,7 +55,9 @@ class DreamService:
         evidence spends tokens to reach the same NOOPs.
         """
         if not force:
-            in_flight = await self._jobs.find_active_for_scope(scope)
+            in_flight = await self._jobs.find_active_for_scope(
+                scope, stale_after_seconds=self._settings.dream.synthesis.job_stale_after_seconds
+            )
             if in_flight is not None:
                 logger.info(
                     "synthesis_job_already_active",
@@ -76,6 +82,62 @@ class DreamService:
 
         await self._queue.enqueue_synthesis(job)
         return job
+
+    # --- automatic triggering ------------------------------------------------------ #
+
+    async def maybe_trigger(self, scope: MemoryScope) -> DreamJob | None:
+        """Queue synthesis if this user has accumulated enough new material.
+
+        Called after a successful write. Returns the job if one was queued.
+
+        Every gate below reads durable state rather than a counter, so nothing
+        can drift out of sync, and a lost job is self-healing: the condition that
+        triggered it is still true, so the next write re-evaluates and re-queues.
+        That is what lets the whole thing run without a message broker.
+
+        Deliberately never raises. Synthesis is a background nicety; a failure
+        here must not fail the user's write.
+        """
+        config = self._settings.dream.synthesis
+        if not (config.enabled and config.auto_trigger):
+            return None
+
+        try:
+            # 1. Global concurrency cap — a traffic spike must not become a
+            #    rate-limit incident on the LLM provider.
+            if await self._jobs.running_count() >= config.auto_trigger_max_concurrent:
+                return None
+
+            # 2. Already working on this user.
+            if await self._jobs.find_active_for_scope(
+                scope, stale_after_seconds=config.job_stale_after_seconds
+            ):
+                return None
+
+            # 3. Cooldown, so a chatty user does not re-derive the same patterns
+            #    every few minutes.
+            last_run = await self._jobs.last_completed_at(scope)
+            if last_run is not None:
+                elapsed = (utcnow() - last_run).total_seconds()
+                if elapsed < config.auto_trigger_cooldown_seconds:
+                    return None
+
+            # 4. Enough NEW material since the last run — not total count, or it
+            #    would fire forever once the user crossed the threshold once.
+            new_memories = await self._memories.count_since(scope, last_run)
+            if new_memories < config.auto_trigger_new_memories:
+                return None
+
+            logger.info(
+                "synthesis_auto_triggered",
+                new_memories=new_memories,
+                threshold=config.auto_trigger_new_memories,
+            )
+            return await self.request_synthesis(scope, requested_by="auto-trigger")
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("auto_trigger_failed", error=str(exc)[:200])
+            return None
 
     # --- execute ---------------------------------------------------------------- #
 

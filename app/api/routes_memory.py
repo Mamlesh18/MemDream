@@ -68,6 +68,11 @@ async def add_memory(
         for result in outcome.results
     ]
 
+    # Synthesis fires on accumulated material rather than a timer. Deliberately
+    # after the response is assembled and never allowed to raise — a background
+    # nicety must not fail the user's write.
+    await container.dream_service.maybe_trigger(scope)
+
     primary = outcome.primary
     return AddMemoryResponse(
         action=primary.action if primary else DreamAction.NOOP,

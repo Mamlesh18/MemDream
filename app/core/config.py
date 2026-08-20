@@ -205,6 +205,27 @@ class SynthesisSettings(BaseModel):
     schedule_cron: str = "0 3 * * *"
     schedule_enabled: bool = False
 
+    # --- automatic triggering ------------------------------------------- #
+    #
+    # Instead of sweeping every user on a timer — which wakes up for people who
+    # have added nothing — synthesis fires when a user has actually accumulated
+    # enough new material. Both inputs are already durable in Mongo, so nothing
+    # needs a counter that could drift.
+
+    auto_trigger: bool = True
+    #: New active memories since the last completed run before synthesis fires.
+    auto_trigger_new_memories: int = 20
+    #: Minimum gap between runs for one user. Without this a chatty user would
+    #: trigger synthesis every few minutes and spend tokens re-deriving the
+    #: same patterns.
+    auto_trigger_cooldown_seconds: int = 21600  # 6 hours
+    #: Ceiling on synthesis jobs in flight across all users. A traffic spike
+    #: must not turn into a rate-limit incident on the provider.
+    auto_trigger_max_concurrent: int = 2
+    #: A job with no progress for this long is treated as abandoned, so a dead
+    #: worker cannot block a user's synthesis forever.
+    job_stale_after_seconds: int = 900
+
 
 class DreamSettings(BaseModel):
     #: ``unified``  — one LLM call decides ADD / SUPERSEDE / MERGE / NOOP.
@@ -349,7 +370,11 @@ class Settings(BaseSettings):
     mongodb_database: str = "memdream"
 
     redis_url: str = "redis://localhost:6379/0"
-    queue_provider: Literal["arq", "inline"] = "arq"
+    #: ``mongo``  — the jobs collection is the queue. No broker. Default, because
+    #:              it makes MongoDB the only infrastructure MemDream needs.
+    #: ``arq``    — Redis-backed, lower claim latency, for high throughput.
+    #: ``inline`` — runs in the API process. Dev and demos only.
+    queue_provider: Literal["mongo", "arq", "inline"] = "mongo"
 
     vector_provider: Literal["faiss", "memory"] = "faiss"
     faiss_path: str = "./data/faiss"

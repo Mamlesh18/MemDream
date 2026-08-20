@@ -343,6 +343,21 @@ class MemoryRepository:
         )
         return await self._db.memories.count_documents(query)
 
+    async def count_since(self, scope: MemoryScope, since=None) -> int:
+        """Active memories created after ``since`` — the auto-trigger's signal.
+
+        ``since=None`` means the user has never been synthesised, so every
+        memory counts as new.
+        """
+        query: dict[str, Any] = {
+            **scope.as_filter(),
+            "status": MemoryStatus.ACTIVE.value,
+            "memoryType": {"$ne": MemoryType.PATTERN.value},
+        }
+        if since is not None:
+            query["createdAt"] = {"$gt": since}
+        return await self._db.memories.count_documents(query)
+
     async def find_by_content_hash(
         self,
         scope: MemoryScope,

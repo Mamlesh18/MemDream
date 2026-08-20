@@ -17,10 +17,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.main import create_app  # noqa: E402
 from memdream import AsyncDreamClient, DreamClient  # noqa: E402
 from memdream.exceptions import DreamNotFoundError, DreamValidationError  # noqa: E402
-
-from app.main import create_app  # noqa: E402
 
 pytestmark = pytest.mark.asyncio
 
