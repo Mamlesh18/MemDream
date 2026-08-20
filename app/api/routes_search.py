@@ -24,7 +24,7 @@ async def search_memories(
     body: SearchMemoryRequest,
     request: Request,
     container: ContainerDep,
-    _auth: AuthDep = None,
+    principal: AuthDep,
 ) -> SearchMemoryResponse:
     """Hybrid semantic search within one user's memories.
 
@@ -41,7 +41,7 @@ async def search_memories(
     Merged memories are excluded by default because their content already lives
     in the canonical memory that absorbed them.
     """
-    scope = scope_from_request(body, container.settings)
+    scope = scope_from_request(body, principal, container.settings)
     results = await container.memory_service.search(scope, body)
 
     return SearchMemoryResponse(
@@ -58,7 +58,6 @@ async def list_audit_operations(
     action: Annotated[list[str] | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-    _auth: AuthDep = None,
 ) -> AuditLogResponse:
     """Every Dream decision for a user, newest first.
 

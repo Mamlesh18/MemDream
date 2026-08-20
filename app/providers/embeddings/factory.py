@@ -20,6 +20,11 @@ def build_embedding_provider(settings: Settings | None = None) -> EmbeddingProvi
 
         return from_settings(settings, name)
 
+    if name == "gemini":
+        from app.providers.embeddings.gemini import from_settings
+
+        return from_settings(settings)
+
     if name == "fake":
         from app.providers.embeddings.fake import FakeEmbeddingProvider
 

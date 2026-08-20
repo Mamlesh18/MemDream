@@ -20,6 +20,18 @@ def build_llm_provider(settings: Settings | None = None) -> LLMProvider:
 
         return from_settings(settings, name)
 
+    # Gemini and Anthropic each need their own SDK: neither speaks the OpenAI
+    # wire format well enough for structured output to be guaranteed.
+    if name == "gemini":
+        from app.providers.llm.gemini import from_settings
+
+        return from_settings(settings)
+
+    if name == "anthropic":
+        from app.providers.llm.anthropic import from_settings
+
+        return from_settings(settings)
+
     if name == "fake":
         from app.providers.llm.fake import FakeLLMProvider
 

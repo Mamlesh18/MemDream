@@ -384,9 +384,9 @@ arq app.workers.synthesis_worker.WorkerSettings
 
 | Layer | Shipped | Interface |
 |---|---|---|
-| LLM | Azure OpenAI · OpenAI · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint · offline fake | `app/providers/llm/base.py` |
-| Embeddings | Azure OpenAI · OpenAI · Ollama · any OpenAI-compatible endpoint · offline fake | `app/providers/embeddings/base.py` |
-| Vector store | FAISS (per-tenant partitions), in-memory | `app/providers/vector_store/base.py` |
+| LLM | Azure OpenAI · OpenAI · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint · **Gemini** · **Anthropic** · offline fake | `app/providers/llm/base.py` |
+| Embeddings | Azure OpenAI · OpenAI · Ollama · any OpenAI-compatible endpoint · **Gemini** · offline fake | `app/providers/embeddings/base.py` |
+| Vector store | FAISS · in-memory · Qdrant · pgvector · Chroma · Pinecone · Milvus · Azure AI Search | `app/providers/vector_store/base.py` |
 | Queue | **MongoDB (default, no broker)** · ARQ + Redis · inline | `app/providers/queue/base.py` |
 | Canonical store | MongoDB | `app/repositories/` |
 
@@ -405,11 +405,29 @@ DREAM_EMBEDDING_PROVIDER=openai  OPENAI_API_KEY=sk-...
 DREAM_LLM_PROVIDER=openai_compatible
 DREAM_OPENAI_BASE_URL=http://vllm.internal/v1
 DREAM_OPENAI_CHAT_MODEL=mistral-7b
+
+# Gemini for both roles — pip install memdream[gemini]
+DREAM_LLM_PROVIDER=gemini         GOOGLE_API_KEY=...
+DREAM_EMBEDDING_PROVIDER=gemini
+
+# Claude for chat, OpenAI for embeddings — pip install memdream[anthropic]
+DREAM_LLM_PROVIDER=anthropic      ANTHROPIC_API_KEY=sk-ant-...
+DREAM_EMBEDDING_PROVIDER=openai   OPENAI_API_KEY=sk-...
 ```
 
 OpenAI, Groq, Ollama, Together and Fireworks all speak the same wire protocol,
 so they are one implementation with a preset table — and they need no extra
 dependency beyond the `openai` package already installed.
+
+Gemini and Anthropic are the two exceptions, each with its own SDK behind an
+optional extra. The reason is **guaranteed structured output**: every Dream
+decision has to satisfy a Pydantic schema, and a provider that can only be
+*asked* for JSON costs a repair round-trip on every malformed reply. Gemini's
+native SDK sets `response_mime_type="application/json"`, a decoding constraint
+rather than an instruction — and reports token usage accurately, which the
+compatibility shim does not. Claude has no JSON mode at all, so its assistant
+turn is prefilled with an opening brace and the model can only continue from
+inside an object.
 
 Nothing in `app/memory` or `app/dream` imports a concrete provider — they take the
 base classes. Adding OpenAI, Ollama, Qdrant, pgvector or Celery is an adapter plus

@@ -31,8 +31,20 @@ faiss-cpu>=1.8
 numpy>=1.26
 
 # --- providers ---------------------------------------------------------------
+# One package covers OpenAI, Azure OpenAI, Groq, Ollama, Together, Fireworks and
+# any other endpoint speaking the OpenAI wire format.
 openai>=1.40
 httpx>=0.27
+
+# Gemini and Anthropic each need their own SDK, because neither can guarantee
+# JSON output through the OpenAI-compatible path. Uncomment the one you use, or
+# install the matching extra:
+#
+#   pip install memdream[gemini]
+#   pip install memdream[anthropic]
+#
+# google-genai>=1.0
+# anthropic>=0.40
 
 # --- background worker -------------------------------------------------------
 arq>=0.26

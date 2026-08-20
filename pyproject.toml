@@ -51,6 +51,12 @@ pinecone = ["pinecone>=5.0"]
 milvus = ["pymilvus>=2.4"]
 azure-search = ["azure-search-documents>=11.5", "azure-core>=1.30"]
 
+# LLM / embedding SDKs. OpenAI, Azure, Groq, Ollama, Together and Fireworks all
+# go through the `openai` package, which is a base dependency; only these two
+# need their own SDK.
+gemini = ["google-genai>=1.0"]
+anthropic = ["anthropic>=0.40"]
+
 otel = [
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",

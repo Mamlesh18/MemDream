@@ -7,14 +7,13 @@ handler is in a position to forget the tenancy check.
 
 from __future__ import annotations
 
-import hmac
 from typing import Annotated
 
 from fastapi import Depends, Header, Query, Request
 
 from app.container import DreamContainer
+from app.core.auth import Principal
 from app.core.config import Settings, get_settings
-from app.core.exceptions import UnauthorizedError
 from app.core.identity import build_scope
 from app.core.logging import bind_scope
 from app.models.requests import _ScopedRequest
@@ -31,39 +30,44 @@ def get_container(request: Request) -> DreamContainer:
 ContainerDep = Annotated[DreamContainer, Depends(get_container)]
 
 
-async def require_api_key(
+async def resolve_principal(
     request: Request,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
-) -> None:
-    """Validate the API key when any are configured.
+) -> Principal:
+    """Authenticate the request and determine which tenant it acts as.
 
-    An empty ``DREAM_API_KEYS`` disables authentication — appropriate when the
-    service runs inside a private network behind its own gateway, and the reason
-    it is opt-in rather than mandatory.
+    Returns an anonymous principal when no keys are configured — a self-hosted
+    deployment behind its own gateway has nobody to impersonate.
     """
-    settings: Settings = get_container(request).settings
-    if not settings.auth_enabled:
-        return
-
-    if not x_api_key:
-        raise UnauthorizedError("Missing X-API-Key header")
-
-    # Constant-time comparison against each configured key: a timing side channel
-    # on an auth check is cheap to avoid.
-    if not any(hmac.compare_digest(x_api_key, key) for key in settings.api_keys):
-        raise UnauthorizedError("Invalid API key")
+    registry = get_container(request).api_keys
+    return await registry.resolve(x_api_key)
 
 
-AuthDep = Annotated[None, Depends(require_api_key)]
+PrincipalDep = Annotated[Principal, Depends(resolve_principal)]
+#: Retained so existing routes keep working; prefer `PrincipalDep`.
+AuthDep = PrincipalDep
 
 
-def scope_from_request(body: _ScopedRequest, settings: Settings | None = None) -> MemoryScope:
-    """Resolve the scope for a request body, and bind it to the log context."""
+def scope_from_request(
+    body: _ScopedRequest,
+    principal: Principal | None = None,
+    settings: Settings | None = None,
+) -> MemoryScope:
+    """Resolve the scope for a request body, and bind it to the log context.
+
+    The tenant comes from `principal` when the key is bound to one — never from
+    the body. That is the whole difference between a self-hosted deployment,
+    where the caller owns everything, and a hosted one, where a request must not
+    be able to name a tenant it does not own.
+    """
+    principal = principal or Principal.anonymous()
+    client_id = principal.resolve_client_id(body.client_id)
+
     scope = build_scope(
         user_id=body.user_id,
         phone_number=body.phone_number,
         agent_id=body.agent_id or body.bot_id,
-        client_id=body.client_id,
+        client_id=client_id,
         namespace=body.namespace,
         settings=settings or get_settings(),
     )
@@ -72,6 +76,7 @@ def scope_from_request(body: _ScopedRequest, settings: Settings | None = None) -
 
 
 async def scope_from_query(
+    principal: PrincipalDep,
     user_id: Annotated[str | None, Query(alias="userId")] = None,
     phone_number: Annotated[str | None, Query(alias="phoneNumber")] = None,
     agent_id: Annotated[str | None, Query(alias="agentId")] = None,
@@ -88,7 +93,7 @@ async def scope_from_query(
         user_id=user_id,
         phone_number=phone_number,
         agent_id=agent_id or bot_id,
-        client_id=client_id,
+        client_id=principal.resolve_client_id(client_id),
     )
     bind_scope(scope)
     return scope

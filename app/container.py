@@ -50,6 +50,7 @@ class DreamContainer:
     memories: MemoryRepository
     audit: AuditRepository
     jobs: JobRepository
+    api_keys: Any
 
     embeddings: EmbeddingProvider
     llm: LLMProvider
@@ -92,6 +93,8 @@ class DreamContainer:
         database = database or MongoDatabase.connect(settings)
         if ensure_indexes:
             await database.ensure_indexes()
+
+        from app.core.auth import ApiKeyRegistry
 
         memories = MemoryRepository(database)
         audit = AuditRepository(database)
@@ -153,6 +156,7 @@ class DreamContainer:
             memories=memories,
             audit=audit,
             jobs=jobs,
+            api_keys=ApiKeyRegistry(settings, database),
             embeddings=embeddings,
             llm=llm,
             vectors=vectors,

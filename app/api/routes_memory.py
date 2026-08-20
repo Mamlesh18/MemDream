@@ -33,7 +33,7 @@ async def add_memory(
     body: AddMemoryRequest,
     request: Request,
     container: ContainerDep,
-    _auth: AuthDep = None,
+    principal: AuthDep,
 ) -> AddMemoryResponse:
     """Extract memories from a message and let Dream decide what to do with them.
 
@@ -42,7 +42,7 @@ async def add_memory(
     consolidation outranks an addition — which keeps the single-fact case, by far
     the most common, as simple as it looks.
     """
-    scope = scope_from_request(body, container.settings)
+    scope = scope_from_request(body, principal, container.settings)
     request_id = getattr(request.state, "request_id", None)
 
     outcome = await container.memory_service.add(
@@ -95,7 +95,7 @@ async def create_memory_manually(
     body: CreateMemoryRequest,
     request: Request,
     container: ContainerDep,
-    _auth: AuthDep = None,
+    principal: AuthDep,
 ) -> MemoryDetailResponse:
     """Write a memory verbatim, bypassing extraction and Dream reasoning.
 
@@ -110,7 +110,7 @@ async def create_memory_manually(
     An identical active memory is returned as-is rather than duplicated; pass
     `allowDuplicate: true` to force a second row.
     """
-    scope = scope_from_request(body, container.settings)
+    scope = scope_from_request(body, principal, container.settings)
 
     memory, created = await container.memory_service.create_manual(
         scope,
@@ -142,8 +142,8 @@ async def update_memory(
     body: UpdateMemoryRequest,
     request: Request,
     container: ContainerDep,
+    principal: AuthDep,
     memory_id: Annotated[str, Path()],
-    _auth: AuthDep = None,
 ) -> MemoryDetailResponse:
     """Correct an active memory in place. Only the fields you send change.
 
@@ -155,7 +155,7 @@ async def update_memory(
     Only `active` memories can be edited. Superseded and merged rows are history,
     and history is not rewritten (`409`).
     """
-    scope = scope_from_request(body, container.settings)
+    scope = scope_from_request(body, principal, container.settings)
 
     memory = await container.memory_service.update_manual(
         scope,
@@ -185,7 +185,6 @@ async def delete_memory(
     container: ContainerDep,
     memory_id: Annotated[str, Path()],
     permanent: Annotated[bool, Query()] = False,
-    _auth: AuthDep = None,
 ) -> DeleteMemoryResponse:
     """Retire a memory, or erase it.
 
@@ -222,7 +221,6 @@ async def purge_user_memories(
     scope: ScopeDep,
     container: ContainerDep,
     confirm: Annotated[str, Query()] = "",
-    _auth: AuthDep = None,
 ) -> PurgeResponse:
     """Erase everything for one user: memories, relationships, audit trail, jobs.
 
@@ -257,7 +255,6 @@ async def list_memories(
     memory_type: Annotated[list[str] | None, Query(alias="memoryType")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-    _auth: AuthDep = None,
 ) -> MemoryListResponse:
     """Browse a user's memories without a semantic query.
 
@@ -287,7 +284,6 @@ async def get_memory(
     scope: ScopeDep,
     container: ContainerDep,
     memory_id: Annotated[str, Path(alias="memory_id")],
-    _auth: AuthDep = None,
 ) -> MemoryDetailResponse:
     """One memory with its relationships, sources and whatever derives from it."""
     detail = await container.memory_service.get_detail(scope, memory_id)
@@ -313,7 +309,6 @@ async def get_memory_history(
     scope: ScopeDep,
     container: ContainerDep,
     memory_id: Annotated[str, Path(alias="memory_id")],
-    _auth: AuthDep = None,
 ) -> MemoryListResponse:
     """Follow `supersedes` edges back to the original fact.
 
@@ -338,7 +333,6 @@ async def get_memory_audit(
     container: ContainerDep,
     memory_id: Annotated[str, Path(alias="memory_id")],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    _auth: AuthDep = None,
 ) -> AuditLogResponse:
     """Every Dream operation that touched this memory."""
     # Scope-check the memory first: the audit collection is keyed by memory id,

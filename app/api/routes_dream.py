@@ -19,7 +19,7 @@ router = APIRouter(prefix="/v1/dream", tags=["dream"])
 async def trigger_synthesis(
     body: SynthesizeRequest,
     container: ContainerDep,
-    _auth: AuthDep = None,
+    principal: AuthDep,
 ) -> SynthesizeResponse:
     """Queue a background synthesis run for one user.
 
@@ -31,7 +31,7 @@ async def trigger_synthesis(
     for tests, demos and CLI use — synthesis takes seconds, so it has no place on
     a user-facing request path.
     """
-    scope = scope_from_request(body, container.settings)
+    scope = scope_from_request(body, principal, container.settings)
     job = await container.dream_service.request_synthesis(
         scope, wait=body.wait, force=body.force
     )
@@ -51,7 +51,6 @@ async def get_dream_job(
     scope: ScopeDep,
     container: ContainerDep,
     job_id: Annotated[str, Path(alias="job_id")],
-    _auth: AuthDep = None,
 ) -> DreamJobResponse:
     """Status and results of one synthesis job.
 
@@ -82,7 +81,6 @@ async def list_dream_jobs(
     container: ContainerDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-    _auth: AuthDep = None,
 ) -> dict:
     jobs = await container.dream_service.list_jobs(scope, limit=limit, offset=offset)
     return {"jobs": [job.public_dump() for job in jobs], "count": len(jobs)}
@@ -92,7 +90,6 @@ async def list_dream_jobs(
 async def dream_stats(
     scope: ScopeDep,
     container: ContainerDep,
-    _auth: AuthDep = None,
 ) -> dict:
     """Memory counts by status, pattern count, and Dream action tallies.
 

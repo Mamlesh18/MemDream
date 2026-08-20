@@ -361,9 +361,20 @@ class Settings(BaseSettings):
     service_name: str = "dream-memory"
     log_level: str = "INFO"
     log_json: bool = True
+    #: Unbound shared secrets. These authenticate but carry no tenant, so
+    #: `clientId` still comes from the request — right for single-tenant.
     #: NoDecode stops pydantic-settings from JSON-decoding this before the
     #: validator below runs. Comma-separated is the documented form.
     api_keys: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    #: Keys bound to a tenant: ``key1:acme,key2:globex``. For a bound key the
+    #: tenant comes from the credential and a request naming a different one is
+    #: refused. Required for any multi-tenant deployment.
+    api_key_clients: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    #: Refuse unbound keys outright, so a leftover shared secret cannot be used
+    #: to reach another tenant. Turn this on when hosting.
+    api_key_require_binding: bool = False
 
     # --- storage ---------------------------------------------------------- #
     mongodb_uri: str = "mongodb://localhost:27017"
@@ -426,10 +437,10 @@ class Settings(BaseSettings):
     # for embeddings" is a normal and common pairing.
     llm_provider: Literal[
         "azure_openai", "openai", "groq", "ollama", "together", "fireworks",
-        "openai_compatible", "fake",
+        "openai_compatible", "gemini", "anthropic", "fake",
     ] = "azure_openai"
     embedding_provider: Literal[
-        "azure_openai", "openai", "ollama", "openai_compatible", "fake"
+        "azure_openai", "openai", "ollama", "openai_compatible", "gemini", "fake"
     ] = "azure_openai"
 
     # Read from the *unprefixed* `AZURE_OPENAI_*` names — the conventional
@@ -439,36 +450,57 @@ class Settings(BaseSettings):
     # "credentials not set" error while the credentials sit right there in .env.
     # The prefixed form is still accepted, for deployments that namespace
     # everything.
+    #
+    # The field's own name is listed *first* in every AliasChoices below, and
+    # that ordering is load-bearing. Sources are merged by key: the init source
+    # contributes `azure_openai_api_key` while the dotenv source contributes
+    # `AZURE_OPENAI_API_KEY`, so the two never collide and source precedence
+    # never gets to apply — alias order decides instead. Listing the field name
+    # first restores the documented behaviour, where an explicit
+    # `Settings(azure_openai_api_key=...)` beats whatever is in `.env`. Any new
+    # aliased field must follow the same rule.
     azure_openai_endpoint: str = Field(
         default="",
-        validation_alias=AliasChoices("AZURE_OPENAI_ENDPOINT", "DREAM_AZURE_OPENAI_ENDPOINT"),
+        validation_alias=AliasChoices(
+            "azure_openai_endpoint", "AZURE_OPENAI_ENDPOINT", "DREAM_AZURE_OPENAI_ENDPOINT"
+        ),
     )
     azure_openai_api_key: str = Field(
         default="",
-        validation_alias=AliasChoices("AZURE_OPENAI_API_KEY", "DREAM_AZURE_OPENAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "azure_openai_api_key", "AZURE_OPENAI_API_KEY", "DREAM_AZURE_OPENAI_API_KEY"
+        ),
     )
     azure_openai_api_version: str = Field(
         default="2024-10-21",
         validation_alias=AliasChoices(
-            "AZURE_OPENAI_API_VERSION", "DREAM_AZURE_OPENAI_API_VERSION"
+            "azure_openai_api_version",
+            "AZURE_OPENAI_API_VERSION",
+            "DREAM_AZURE_OPENAI_API_VERSION",
         ),
     )
     azure_openai_chat_deployment: str = Field(
         default="gpt-4o-mini",
         validation_alias=AliasChoices(
-            "AZURE_OPENAI_CHAT_DEPLOYMENT", "DREAM_AZURE_OPENAI_CHAT_DEPLOYMENT"
+            "azure_openai_chat_deployment",
+            "AZURE_OPENAI_CHAT_DEPLOYMENT",
+            "DREAM_AZURE_OPENAI_CHAT_DEPLOYMENT",
         ),
     )
     azure_openai_embedding_deployment: str = Field(
         default="text-embedding-3-small",
         validation_alias=AliasChoices(
-            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "DREAM_AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
+            "azure_openai_embedding_deployment",
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
+            "DREAM_AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
         ),
     )
     azure_openai_embedding_dimensions: int = Field(
         default=1536,
         validation_alias=AliasChoices(
-            "AZURE_OPENAI_EMBEDDING_DIMENSIONS", "DREAM_AZURE_OPENAI_EMBEDDING_DIMENSIONS"
+            "azure_openai_embedding_dimensions",
+            "AZURE_OPENAI_EMBEDDING_DIMENSIONS",
+            "DREAM_AZURE_OPENAI_EMBEDDING_DIMENSIONS",
         ),
     )
 
@@ -480,13 +512,46 @@ class Settings(BaseSettings):
     # already has exported.
     openai_api_key: str = Field(
         default="",
-        validation_alias=AliasChoices("DREAM_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        validation_alias=AliasChoices(
+            "openai_api_key", "DREAM_OPENAI_API_KEY", "OPENAI_API_KEY"
+        ),
     )
     openai_base_url: str = ""
     openai_chat_model: str = ""
     openai_embedding_model: str = ""
     #: 0 means "use the preset default for this provider".
     openai_embedding_dimensions: int = 0
+
+    # --- Gemini ------------------------------------------------------------ #
+    #
+    # Gemini has an OpenAI-compatible shim, but the native SDK is used instead:
+    # it guarantees JSON output as a decoding constraint and reports token usage
+    # accurately, neither of which the shim does reliably. Gemini does both chat
+    # and embeddings, so it can serve as the only provider a deployment needs.
+    gemini_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "gemini_api_key", "DREAM_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"
+        ),
+    )
+    gemini_chat_model: str = "gemini-2.0-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
+    #: Matryoshka output width. 768 rather than the maximum because a memory
+    #: layer runs a similarity search on every write, and the accuracy cost at
+    #: this text length is small.
+    gemini_embedding_dimensions: int = 768
+
+    # --- Anthropic --------------------------------------------------------- #
+    #
+    # Chat only: Anthropic has no embeddings API, so pair this with OpenAI,
+    # Azure, Gemini or Ollama for `DREAM_EMBEDDING_PROVIDER`.
+    anthropic_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "anthropic_api_key", "DREAM_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"
+        ),
+    )
+    anthropic_model: str = "claude-sonnet-4-5"
 
     # --- privacy ---------------------------------------------------------- #
     identity_salt: str = "dream-memory-default-salt"
@@ -502,7 +567,9 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     pricing: PricingSettings = Field(default_factory=PricingSettings)
 
-    _split_api_keys = field_validator("api_keys", mode="before")(_parse_string_list)
+    _split_api_keys = field_validator(
+        "api_keys", "api_key_clients", mode="before"
+    )(_parse_string_list)
 
     @classmethod
     def settings_customise_sources(
@@ -525,7 +592,12 @@ class Settings(BaseSettings):
 
     @property
     def auth_enabled(self) -> bool:
-        return bool(self.api_keys)
+        """True when any credential is configured.
+
+        Empty means no authentication — appropriate behind a private gateway,
+        and the reason it is opt-in rather than mandatory.
+        """
+        return bool(self.api_keys or self.api_key_clients)
 
     def require_azure_openai(self) -> None:
         """Fail fast with an actionable message rather than at the first call."""
