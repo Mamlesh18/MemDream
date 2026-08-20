@@ -158,9 +158,7 @@ def make_memory(scope):
     ) -> Memory:
         used = target_scope or scope
         return Memory(
-            client_id=used.client_id,
-            bot_id=used.bot_id,
-            user_id=used.user_id,
+            **used.as_model_fields(),
             content=content,
             memory_type=memory_type,
             importance=importance,

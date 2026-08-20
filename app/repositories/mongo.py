@@ -25,7 +25,9 @@ JOBS = "dream_jobs"
 
 #: Prefix on every tenant-scoped index. Declared once so it is obvious that
 #: every access path starts from the scope triple rather than ending with it.
-_SCOPE_KEYS = [("clientId", ASCENDING), ("botId", ASCENDING), ("userId", ASCENDING)]
+#: Every scoped query filters on this single key — see models/scope.py for why
+#: one digest beats a predicate over optional dimensions.
+_SCOPE_KEYS = [("scopeKey", ASCENDING)]
 
 
 class MongoDatabase:

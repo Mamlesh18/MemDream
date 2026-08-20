@@ -25,7 +25,6 @@ Both are derived only from the scope, never from anything a model produced.
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 
 from app.models.scope import MemoryScope
@@ -36,23 +35,35 @@ _UUID_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
 
 
 def scope_key(scope: MemoryScope) -> str:
-    """A short, filesystem- and URL-safe digest of the tenancy triple.
+    """A short, filesystem- and URL-safe digest of the whole scope.
 
     Hashed rather than concatenated for two reasons: tenant ids may contain
     characters that are illegal in a Pinecone namespace or a collection name,
     and a digest keeps customer identifiers out of infrastructure metadata that
     tends to end up in dashboards and logs.
     """
-    return hashlib.sha256(scope.partition_key.encode("utf-8")).hexdigest()[:32]
+    return scope.scope_key
 
 
 def scope_fields(scope: MemoryScope) -> dict[str, str]:
-    """The tenancy triple as metadata, for stores that filter rather than partition."""
-    return {
-        "client_id": scope.client_id,
-        "bot_id": scope.bot_id,
-        "user_id": scope.user_id,
-    }
+    """Scope as filterable metadata, for stores that filter rather than partition.
+
+    Only `scope_key` is used for isolation — one indexed equality check, which
+    cannot be got subtly wrong the way a predicate over optional fields can.
+    The readable dimensions ride along for operators inspecting the backend by
+    hand, and are omitted when unset so no store has to reason about nulls.
+    """
+    fields = {"scope_key": scope.scope_key, "user_id": scope.user_id}
+    if scope.agent_id:
+        fields["agent_id"] = scope.agent_id
+    if scope.client_id:
+        fields["client_id"] = scope.client_id
+    return fields
+
+
+def isolation_fields(scope: MemoryScope) -> dict[str, str]:
+    """The minimal filter a backend must apply. Never widen this."""
+    return {"scope_key": scope.scope_key}
 
 
 def scoped_id(scope: MemoryScope, memory_id: str) -> str:

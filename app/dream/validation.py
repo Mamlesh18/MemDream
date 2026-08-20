@@ -122,9 +122,7 @@ def build_memory(
     explicit = getattr(proposal, "explicit", True)
 
     return Memory(
-        client_id=scope.client_id,
-        bot_id=scope.bot_id,
-        user_id=scope.user_id,
+        **scope.as_model_fields(),
         phone_number_hash=scope.phone_number_hash,
         content=proposal.content.strip(),
         memory_type=proposal.memory_type,

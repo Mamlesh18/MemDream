@@ -330,9 +330,7 @@ class SynthesisEngine:
 
         pattern = Memory(
             memory_id=new_memory_id(MemoryType.PATTERN.value),
-            client_id=scope.client_id,
-            bot_id=scope.bot_id,
-            user_id=scope.user_id,
+            **scope.as_model_fields(),
             phone_number_hash=scope.phone_number_hash,
             content=content,
             memory_type=MemoryType.PATTERN.value,
@@ -526,9 +524,7 @@ class SynthesisEngine:
         await self._audit.record(
             DreamOperation(
                 operation_id=operation_id,
-                client_id=scope.client_id,
-                bot_id=scope.bot_id,
-                user_id=scope.user_id,
+                **scope.as_model_fields(),
                 action=action,
                 memory_id=memory_id,
                 target_memory_ids=list(targets),

@@ -13,7 +13,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import (
     DreamAction,
@@ -212,6 +212,7 @@ class SynthesisDecision(_LLMModel):
 # --------------------------------------------------------------------------- #
 
 
+# scope-keyed:DreamOperation
 class DreamOperation(BaseModel):
     """One audit row. Written for every Dream decision, NOOPs included.
 
@@ -223,9 +224,11 @@ class DreamOperation(BaseModel):
 
     operation_id: str = Field(default_factory=lambda: f"op_{uuid.uuid4().hex[:24]}")
 
-    client_id: str
-    bot_id: str
     user_id: str
+    agent_id: str | None = None
+    client_id: str | None = None
+    namespace: dict[str, str] = Field(default_factory=dict)
+    scope_key: str = ""
 
     action: str
     #: The memory that ended up active as a result (None for NOOP).
@@ -251,6 +254,42 @@ class DreamOperation(BaseModel):
 
     timestamp: datetime = Field(default_factory=utcnow)
 
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scope_compat(cls, data):
+        """Accept the old `bot_id` spelling and derive the partition key.
+
+        Derived here rather than at each construction site, so a row can never
+        be written without the key its own partition is filtered on.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+
+        legacy = data.pop("bot_id", None) or data.pop("botId", None)
+        if legacy is not None:
+            data.setdefault("agent_id", legacy)
+
+        if not data.get("scope_key") and not data.get("scopeKey"):
+            from app.models.scope import MemoryScope
+
+            user_id = data.get("user_id") or data.get("userId")
+            if user_id:
+                data["scope_key"] = MemoryScope(
+                    user_id=user_id,
+                    agent_id=data.get("agent_id") or data.get("agentId"),
+                    client_id=data.get("client_id") or data.get("clientId"),
+                    namespace=data.get("namespace") or {},
+                ).scope_key
+        return data
+
+
+    @property
+    def bot_id(self) -> str | None:
+        """Previous name for `agent_id`. Kept so existing callers keep working."""
+        return self.agent_id
+
     def to_document(self) -> dict[str, Any]:
         doc = self.model_dump(by_alias=True)
         doc["_id"] = doc.pop("operationId")
@@ -269,6 +308,7 @@ class DreamOperation(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+# scope-keyed:DreamJob
 class DreamJob(BaseModel):
     """A queued or completed synthesis run."""
 
@@ -276,9 +316,11 @@ class DreamJob(BaseModel):
 
     job_id: str = Field(default_factory=lambda: f"dream_job_{uuid.uuid4().hex[:16]}")
 
-    client_id: str
-    bot_id: str
     user_id: str
+    agent_id: str | None = None
+    client_id: str | None = None
+    namespace: dict[str, str] = Field(default_factory=dict)
+    scope_key: str = ""
 
     status: JobStatus = JobStatus.QUEUED
     job_type: str = "synthesis"
@@ -301,6 +343,42 @@ class DreamJob(BaseModel):
 
     requested_by: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scope_compat(cls, data):
+        """Accept the old `bot_id` spelling and derive the partition key.
+
+        Derived here rather than at each construction site, so a row can never
+        be written without the key its own partition is filtered on.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+
+        legacy = data.pop("bot_id", None) or data.pop("botId", None)
+        if legacy is not None:
+            data.setdefault("agent_id", legacy)
+
+        if not data.get("scope_key") and not data.get("scopeKey"):
+            from app.models.scope import MemoryScope
+
+            user_id = data.get("user_id") or data.get("userId")
+            if user_id:
+                data["scope_key"] = MemoryScope(
+                    user_id=user_id,
+                    agent_id=data.get("agent_id") or data.get("agentId"),
+                    client_id=data.get("client_id") or data.get("clientId"),
+                    namespace=data.get("namespace") or {},
+                ).scope_key
+        return data
+
+
+    @property
+    def bot_id(self) -> str | None:
+        """Previous name for `agent_id`. Kept so existing callers keep working."""
+        return self.agent_id
 
     def to_document(self) -> dict[str, Any]:
         doc = self.model_dump(by_alias=True)

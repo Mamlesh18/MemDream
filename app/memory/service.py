@@ -193,9 +193,7 @@ class MemoryService:
         with operation(OP_MANUAL):
             embedding = await self._embeddings.embed(content)
         memory = MemoryModel(
-            client_id=scope.client_id,
-            bot_id=scope.bot_id,
-            user_id=scope.user_id,
+            **scope.as_model_fields(),
             phone_number_hash=scope.phone_number_hash,
             content=content,
             memory_type=(memory_type or "other").strip().lower(),
@@ -366,9 +364,7 @@ class MemoryService:
     ) -> None:
         await self._audit.record(
             DreamOperation(
-                client_id=scope.client_id,
-                bot_id=scope.bot_id,
-                user_id=scope.user_id,
+                **scope.as_model_fields(),
                 action=action,
                 memory_id=memory_id,
                 reason=reason,

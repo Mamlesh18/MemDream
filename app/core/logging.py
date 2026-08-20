@@ -102,8 +102,9 @@ def set_operation_id(operation_id: str | None) -> None:
     _operation_id.set(operation_id)
 
 
-def bind_scope(client_id: str, bot_id: str, user_id: str) -> None:
-    _scope_fields.set({"client_id": client_id, "bot_id": bot_id, "user_id": user_id})
+def bind_scope(scope) -> None:
+    """Bind a `MemoryScope` to the log context. Unset dimensions are omitted."""
+    _scope_fields.set(scope.as_log_fields())
 
 
 def clear_scope() -> None:

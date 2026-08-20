@@ -205,19 +205,30 @@ async def test_cross_tenant_read_raises_not_found(sdk):
 # --------------------------------------------------------------------------- #
 
 
-async def test_missing_scope_fails_before_any_request():
+async def test_missing_identity_fails_before_any_request():
     """Caught locally rather than after a round trip to a server that would
     only reject it anyway."""
     client = DreamClient(base_url="http://localhost:1")
-    with pytest.raises(ValueError, match="clientId"):
+    with pytest.raises(ValueError, match="user_id or phone_number"):
         client.memory.add("hello")
     client.close()
 
 
-async def test_missing_identity_fails_before_any_request():
-    client = DreamClient(base_url="http://localhost:1", client_id="c", bot_id="b")
-    with pytest.raises(ValueError, match="phone_number or user_id"):
-        client.memory.add("hello")
+async def test_a_user_id_alone_is_enough():
+    """The whole point of the relaxed scope: a solo developer with one agent
+    should not have to invent a client_id."""
+    client = DreamClient(base_url="http://localhost:1", user_id="alice")
+    assert client._defaults.resolve() == {"userId": "alice"}
+    client.close()
+
+
+async def test_optional_dimensions_are_omitted_when_unset():
+    """An unset dimension must not become an empty string, or it would create a
+    different partition from one that omitted it entirely."""
+    client = DreamClient(base_url="http://localhost:1", user_id="alice", agent_id="support")
+    resolved = client._defaults.resolve()
+    assert resolved == {"userId": "alice", "agentId": "support"}
+    assert "clientId" not in resolved
     client.close()
 
 

@@ -16,9 +16,12 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+if TYPE_CHECKING:
+    from app.models.scope import MemoryScope
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import MemoryStatus, MemoryType, RelationType, TemporalNature
 
@@ -81,9 +84,15 @@ class Memory(BaseModel):
     memory_id: str = Field(default_factory=new_memory_id)
 
     # --- tenancy (never derived from model output) ------------------------ #
-    client_id: str
-    bot_id: str
+    #
+    # `user_id` is the isolation boundary; the rest are optional dimensions.
+    # `scope_key` is the digest actually filtered on — see models/scope.py for
+    # why filtering uses one indexed key rather than a multi-field predicate.
     user_id: str
+    agent_id: str | None = None
+    client_id: str | None = None
+    namespace: dict[str, str] = Field(default_factory=dict)
+    scope_key: str = ""
     phone_number_hash: str | None = None
 
     # --- content ---------------------------------------------------------- #
@@ -129,6 +138,17 @@ class Memory(BaseModel):
     last_synthesized_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_bot_id(cls, data):
+        """`bot_id` was the previous name for `agent_id`."""
+        if isinstance(data, dict) and ("bot_id" in data or "botId" in data):
+            data = dict(data)
+            legacy = data.pop("bot_id", None) or data.pop("botId", None)
+            if legacy is not None:
+                data.setdefault("agent_id", legacy)
+        return data
+
     @field_validator("content")
     @classmethod
     def _content_not_blank(cls, value: str) -> str:
@@ -145,6 +165,22 @@ class Memory(BaseModel):
     def model_post_init(self, _context: Any) -> None:
         if not self.content_hash:
             object.__setattr__(self, "content_hash", content_fingerprint(self.content))
+        if not self.scope_key:
+            # Derived here rather than at each construction site, so a memory can
+            # never be written without the key its own partition is filtered on.
+            object.__setattr__(self, "scope_key", self.scope.scope_key)
+
+    @property
+    def scope(self) -> MemoryScope:
+        """The partition this memory belongs to."""
+        from app.models.scope import MemoryScope
+
+        return MemoryScope(
+            user_id=self.user_id,
+            agent_id=self.agent_id,
+            client_id=self.client_id,
+            namespace=self.namespace,
+        )
 
     # --- helpers ----------------------------------------------------------- #
 
@@ -158,6 +194,12 @@ class Memory(BaseModel):
 
     def touch(self) -> None:
         self.updated_at = utcnow()
+
+
+    @property
+    def bot_id(self) -> str | None:
+        """Previous name for `agent_id`. Kept so existing callers keep working."""
+        return self.agent_id
 
     def to_document(self) -> dict[str, Any]:
         """Serialise for Mongo, using ``memoryId`` as the primary key."""
@@ -183,6 +225,7 @@ class Memory(BaseModel):
         return data
 
 
+# scope-keyed:MemoryRelation
 class MemoryRelation(BaseModel):
     """A directed edge between two memories in the same scope.
 
@@ -193,9 +236,11 @@ class MemoryRelation(BaseModel):
     model_config = ConfigDict(alias_generator=_to_camel, populate_by_name=True)
 
     relation_id: str = Field(default_factory=lambda: f"rel_{uuid.uuid4().hex[:24]}")
-    client_id: str
-    bot_id: str
     user_id: str
+    agent_id: str | None = None
+    client_id: str | None = None
+    namespace: dict[str, str] = Field(default_factory=dict)
+    scope_key: str = ""
 
     from_memory_id: str
     to_memory_id: str
@@ -205,6 +250,42 @@ class MemoryRelation(BaseModel):
     #: The Dream operation that created this edge, for audit joins.
     operation_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scope_compat(cls, data):
+        """Accept the old `bot_id` spelling and derive the partition key.
+
+        Derived here rather than at each construction site, so a row can never
+        be written without the key its own partition is filtered on.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+
+        legacy = data.pop("bot_id", None) or data.pop("botId", None)
+        if legacy is not None:
+            data.setdefault("agent_id", legacy)
+
+        if not data.get("scope_key") and not data.get("scopeKey"):
+            from app.models.scope import MemoryScope
+
+            user_id = data.get("user_id") or data.get("userId")
+            if user_id:
+                data["scope_key"] = MemoryScope(
+                    user_id=user_id,
+                    agent_id=data.get("agent_id") or data.get("agentId"),
+                    client_id=data.get("client_id") or data.get("clientId"),
+                    namespace=data.get("namespace") or {},
+                ).scope_key
+        return data
+
+
+    @property
+    def bot_id(self) -> str | None:
+        """Previous name for `agent_id`. Kept so existing callers keep working."""
+        return self.agent_id
 
     def to_document(self) -> dict[str, Any]:
         doc = self.model_dump(by_alias=True)

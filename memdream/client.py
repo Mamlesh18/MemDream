@@ -25,46 +25,61 @@ DEFAULT_TIMEOUT = 60.0
 
 
 class _ScopeDefaults:
-    """Scope values supplied once and merged into every call."""
+    """Scope values supplied once and merged into every call.
+
+    Only `user_id` (or `phone_number`) is required. `agent_id`, `client_id` and
+    `namespace` are optional partition dimensions — supply the ones your
+    deployment has.
+    """
 
     def __init__(
+        self,
+        user_id: str | None = None,
+        phone_number: str | None = None,
+        agent_id: str | None = None,
+        client_id: str | None = None,
+        namespace: dict[str, str] | None = None,
+        bot_id: str | None = None,
+    ) -> None:
+        self.user_id = user_id
+        self.phone_number = phone_number
+        # `bot_id` is the previous name for `agent_id`.
+        self.agent_id = agent_id or bot_id
+        self.client_id = client_id
+        self.namespace = namespace or {}
+
+    def resolve(
         self,
         client_id: str | None = None,
         bot_id: str | None = None,
         phone_number: str | None = None,
         user_id: str | None = None,
-    ) -> None:
-        self.client_id = client_id
-        self.bot_id = bot_id
-        self.phone_number = phone_number
-        self.user_id = user_id
-
-    def resolve(
-        self,
-        client_id: str | None,
-        bot_id: str | None,
-        phone_number: str | None,
-        user_id: str | None,
-    ) -> dict[str, str]:
-        resolved = {
-            "clientId": client_id or self.client_id,
-            "botId": bot_id or self.bot_id,
-        }
-        phone = phone_number or self.phone_number
+        agent_id: str | None = None,
+        namespace: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         user = user_id or self.user_id
-        if phone:
-            resolved["phoneNumber"] = phone
-        if user:
-            resolved["userId"] = user
-
-        missing = [key for key in ("clientId", "botId") if not resolved.get(key)]
-        if missing:
+        phone = phone_number or self.phone_number
+        if not user and not phone:
             raise ValueError(
-                f"{', '.join(missing)} must be supplied, either on the call or "
+                "Either user_id or phone_number must be supplied, on the call or "
                 "as a client default"
             )
-        if not phone and not user:
-            raise ValueError("Either phone_number or user_id must be supplied")
+
+        resolved: dict[str, Any] = {}
+        if user:
+            resolved["userId"] = user
+        if phone:
+            resolved["phoneNumber"] = phone
+
+        agent = agent_id or bot_id or self.agent_id
+        if agent:
+            resolved["agentId"] = agent
+        tenant = client_id or self.client_id
+        if tenant:
+            resolved["clientId"] = tenant
+        combined = {**self.namespace, **(namespace or {})}
+        if combined:
+            resolved["namespace"] = combined
         return resolved
 
 
@@ -98,10 +113,12 @@ class DreamClient:
         base_url: str = "http://localhost:8000",
         *,
         api_key: str | None = None,
-        client_id: str | None = None,
-        bot_id: str | None = None,
-        phone_number: str | None = None,
         user_id: str | None = None,
+        phone_number: str | None = None,
+        agent_id: str | None = None,
+        client_id: str | None = None,
+        namespace: dict[str, str] | None = None,
+        bot_id: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -113,7 +130,14 @@ class DreamClient:
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout
         )
         self._owns_http = http_client is None
-        self._defaults = _ScopeDefaults(client_id, bot_id, phone_number, user_id)
+        self._defaults = _ScopeDefaults(
+            user_id=user_id,
+            phone_number=phone_number,
+            agent_id=agent_id,
+            client_id=client_id,
+            namespace=namespace,
+            bot_id=bot_id,
+        )
 
         self.memory = _MemoryAPI(self)
         self.dream = _DreamAPI(self)
@@ -230,6 +254,7 @@ class _MemoryAPI:
         user_id: str | None = None,
     ) -> MemoryDetail:
         params = self._client._defaults.resolve(client_id, bot_id, phone_number, user_id)
+        params.pop("namespace", None)  # query strings carry flat values only
         return MemoryDetail.from_dict(
             self._client._request("GET", f"/v1/memories/{memory_id}", params=params)
         )
@@ -377,6 +402,7 @@ class _MemoryAPI:
     ) -> list[MemoryRecord]:
         """Walk the supersede chain back to the original fact."""
         params = self._client._defaults.resolve(client_id, bot_id, phone_number, user_id)
+        params.pop("namespace", None)  # query strings carry flat values only
         data = self._client._request("GET", f"/v1/memories/{memory_id}/history", params=params)
         return [MemoryRecord.from_dict(item) for item in data.get("memories", [])]
 
@@ -435,6 +461,7 @@ class _DreamAPI:
         user_id: str | None = None,
     ) -> DreamJob:
         params = self._client._defaults.resolve(client_id, bot_id, phone_number, user_id)
+        params.pop("namespace", None)  # query strings carry flat values only
         return DreamJob.from_dict(
             self._client._request("GET", f"/v1/dream/jobs/{job_id}", params=params)
         )
@@ -489,10 +516,12 @@ class AsyncDreamClient:
         base_url: str = "http://localhost:8000",
         *,
         api_key: str | None = None,
-        client_id: str | None = None,
-        bot_id: str | None = None,
-        phone_number: str | None = None,
         user_id: str | None = None,
+        phone_number: str | None = None,
+        agent_id: str | None = None,
+        client_id: str | None = None,
+        namespace: dict[str, str] | None = None,
+        bot_id: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -504,7 +533,14 @@ class AsyncDreamClient:
             base_url=base_url.rstrip("/"), headers=headers, timeout=timeout
         )
         self._owns_http = http_client is None
-        self._defaults = _ScopeDefaults(client_id, bot_id, phone_number, user_id)
+        self._defaults = _ScopeDefaults(
+            user_id=user_id,
+            phone_number=phone_number,
+            agent_id=agent_id,
+            client_id=client_id,
+            namespace=namespace,
+            bot_id=bot_id,
+        )
 
         self.memory = _AsyncMemoryAPI(self)
         self.dream = _AsyncDreamAPI(self)

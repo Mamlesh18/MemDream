@@ -456,9 +456,7 @@ class MemoryRepository:
 
         for source, target, edge_type in edges:
             relation = MemoryRelation(
-                client_id=scope.client_id,
-                bot_id=scope.bot_id,
-                user_id=scope.user_id,
+                **scope.as_model_fields(),
                 from_memory_id=source,
                 to_memory_id=target,
                 relation_type=edge_type,

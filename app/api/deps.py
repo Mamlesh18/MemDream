@@ -60,21 +60,23 @@ AuthDep = Annotated[None, Depends(require_api_key)]
 def scope_from_request(body: _ScopedRequest, settings: Settings | None = None) -> MemoryScope:
     """Resolve the scope for a request body, and bind it to the log context."""
     scope = build_scope(
-        client_id=body.client_id,
-        bot_id=body.bot_id,
-        phone_number=body.phone_number,
         user_id=body.user_id,
+        phone_number=body.phone_number,
+        agent_id=body.agent_id or body.bot_id,
+        client_id=body.client_id,
+        namespace=body.namespace,
         settings=settings or get_settings(),
     )
-    bind_scope(scope.client_id, scope.bot_id, scope.user_id)
+    bind_scope(scope)
     return scope
 
 
 async def scope_from_query(
-    client_id: Annotated[str, Query(alias="clientId", min_length=1)],
-    bot_id: Annotated[str, Query(alias="botId", min_length=1)],
-    phone_number: Annotated[str | None, Query(alias="phoneNumber")] = None,
     user_id: Annotated[str | None, Query(alias="userId")] = None,
+    phone_number: Annotated[str | None, Query(alias="phoneNumber")] = None,
+    agent_id: Annotated[str | None, Query(alias="agentId")] = None,
+    client_id: Annotated[str | None, Query(alias="clientId")] = None,
+    bot_id: Annotated[str | None, Query(alias="botId")] = None,
 ) -> MemoryScope:
     """Scope for GET endpoints.
 
@@ -83,12 +85,12 @@ async def scope_from_query(
     record.
     """
     scope = build_scope(
-        client_id=client_id,
-        bot_id=bot_id,
-        phone_number=phone_number,
         user_id=user_id,
+        phone_number=phone_number,
+        agent_id=agent_id or bot_id,
+        client_id=client_id,
     )
-    bind_scope(scope.client_id, scope.bot_id, scope.user_id)
+    bind_scope(scope)
     return scope
 
 

@@ -64,45 +64,49 @@ def hash_phone_number(phone_number: str, settings: Settings | None = None) -> st
 
 def derive_user_id(
     *,
-    client_id: str,
-    bot_id: str,
     phone_number: str,
+    client_id: str | None = None,
+    agent_id: str | None = None,
+    bot_id: str | None = None,
     settings: Settings | None = None,
 ) -> str:
-    """Derive a ``userId`` from a phone number, scoped to (client, bot).
+    """Derive a ``userId`` from a phone number.
 
-    Scoping the hash means the same person contacting two different clients gets
-    two unrelated identifiers, so identity cannot be correlated across tenants
-    by comparing stored ids.
+    Salted with whatever dimensions were supplied, which is what keeps identity
+    from colliding across tenants: the same person contacting two clients gets
+    two unrelated ids, so nothing can be correlated by comparing stored values.
+
+    With no dimensions supplied the id depends only on the number — correct for
+    a single-tenant deployment, and the reason `build_scope` warns when a
+    multi-tenant one omits them.
     """
     settings = settings or get_settings()
+    # `bot_id` is the previous name for `agent_id`.
+    agent_id = agent_id or bot_id
     normalized = normalize_phone_number(phone_number)
-    digest = _digest(settings.identity_salt, "user", client_id, bot_id, normalized)
+    digest = _digest(settings.identity_salt, "user", client_id or "", agent_id or "", normalized)
     return f"user_{digest[:24]}"
 
 
 def build_scope(
     *,
-    client_id: str,
-    bot_id: str,
-    phone_number: str | None = None,
     user_id: str | None = None,
+    phone_number: str | None = None,
+    agent_id: str | None = None,
+    client_id: str | None = None,
+    bot_id: str | None = None,
+    namespace: dict[str, str] | None = None,
     settings: Settings | None = None,
 ) -> MemoryScope:
     """Build the scope for a request.
 
-    Callers supply either a ``phoneNumber`` (the common case — the framework
-    derives the identity) or an already-normalised ``userId`` of their own. If
-    both arrive, the explicit ``userId`` wins and the phone number is still
-    hashed for reconciliation.
+    ``user_id`` is the only thing required, and it can arrive two ways: supplied
+    directly by a caller that has its own identifier, or derived from a phone
+    number. Everything else is optional and adds a partition dimension.
     """
     settings = settings or get_settings()
-    client_id = (client_id or "").strip()
-    bot_id = (bot_id or "").strip()
-    if not client_id:
-        raise ValidationError("clientId is required")
-    if not bot_id:
-        raise ValidationError("botId is required")
+    # `bot_id` is the previous name for `agent_id`.
+    agent_id = agent_id or bot_id
 
     phone_hash: str | None = None
     if phone_number:
@@ -111,17 +115,21 @@ def build_scope(
     resolved = (user_id or "").strip()
     if not resolved:
         if not phone_number:
-            raise ValidationError("Either phoneNumber or userId must be provided")
+            raise ValidationError(
+                "A userId is required. Supply one directly, or a phoneNumber to "
+                "derive it from."
+            )
         resolved = derive_user_id(
-            client_id=client_id,
-            bot_id=bot_id,
             phone_number=phone_number,
+            client_id=client_id,
+            agent_id=agent_id,
             settings=settings,
         )
 
     return MemoryScope(
-        client_id=client_id,
-        bot_id=bot_id,
         user_id=resolved,
+        agent_id=(agent_id or "").strip() or None,
+        client_id=(client_id or "").strip() or None,
+        namespace=dict(namespace or {}),
         phone_number_hash=phone_hash,
     )

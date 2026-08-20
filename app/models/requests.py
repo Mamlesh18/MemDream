@@ -26,19 +26,35 @@ class _APIModel(BaseModel):
 
 
 class _ScopedRequest(_APIModel):
-    """Shared tenancy fields. Every endpoint that touches memories uses these."""
+    """Shared tenancy fields. Every endpoint that touches memories uses these.
 
-    client_id: str = Field(min_length=1, max_length=128)
-    bot_id: str = Field(min_length=1, max_length=128)
-    phone_number: str | None = Field(default=None, max_length=32)
-    #: Supply this instead of a phone number when the caller already has its own
-    #: stable user identifier.
+    Only the user matters. `agentId`, `clientId` and `namespace` are optional
+    dimensions that further partition the memory — supply the ones your
+    deployment actually has, and omit the rest. A single-agent app needs none of
+    them.
+
+    Identity arrives either as `userId` (you have your own identifier) or as
+    `phoneNumber` (MemDream derives one, salted with whatever dimensions were
+    supplied so it cannot collide across tenants).
+    """
+
     user_id: str | None = Field(default=None, max_length=128)
+    phone_number: str | None = Field(default=None, max_length=32)
+
+    #: Which agent or bot. Optional.
+    agent_id: str | None = Field(default=None, max_length=128)
+    #: The tenant, for platforms serving several customers. Optional.
+    client_id: str | None = Field(default=None, max_length=128)
+    #: Any further partition dimensions: environment, region, workspace.
+    namespace: dict[str, str] = Field(default_factory=dict)
+
+    #: Previous name for `agentId`, still accepted.
+    bot_id: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def _require_identity(self) -> _ScopedRequest:
         if not self.phone_number and not self.user_id:
-            raise ValueError("Either phoneNumber or userId must be provided")
+            raise ValueError("Either userId or phoneNumber must be provided")
         return self
 
 

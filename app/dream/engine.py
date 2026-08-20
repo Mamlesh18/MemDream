@@ -645,9 +645,7 @@ class DreamEngine:
         await self._audit.record(
             DreamOperation(
                 operation_id=operation_id,
-                client_id=scope.client_id,
-                bot_id=scope.bot_id,
-                user_id=scope.user_id,
+                **scope.as_model_fields(),
                 action=action.value,
                 memory_id=memory_id,
                 target_memory_ids=list(targets),

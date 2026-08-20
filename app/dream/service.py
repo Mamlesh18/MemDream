@@ -67,9 +67,7 @@ class DreamService:
                 return in_flight
 
         job = DreamJob(
-            client_id=scope.client_id,
-            bot_id=scope.bot_id,
-            user_id=scope.user_id,
+            **scope.as_model_fields(),
             requested_by=requested_by,
             metadata={"force": force},
         )
