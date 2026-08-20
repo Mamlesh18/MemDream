@@ -75,8 +75,13 @@ async def scheduled_synthesis(ctx: dict[str, Any]) -> dict[str, Any]:
     failed = 0
 
     for entry in scopes:
+        # Every dimension, not just the triple: a scope missing one computes a
+        # scopeKey that matches none of this user's memories.
         scope = MemoryScope(
-            client_id=entry["clientId"], bot_id=entry["botId"], user_id=entry["userId"]
+            user_id=entry["userId"],
+            agent_id=entry.get("agentId"),
+            client_id=entry.get("clientId"),
+            namespace=entry.get("namespace") or {},
         )
         try:
             job = await container.dream_service.request_synthesis(

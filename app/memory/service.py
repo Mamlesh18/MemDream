@@ -22,8 +22,7 @@ from app.models.memory import Memory, ScoredMemory, content_fingerprint, utcnow
 from app.models.requests import RelatedMemory, SearchMemoryRequest
 from app.models.scope import MemoryScope
 from app.providers.embeddings.base import EmbeddingProvider
-from app.repositories.audit_repository import AuditRepository
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import AuditRepository, MemoryRepository
 
 logger = get_logger(__name__)
 

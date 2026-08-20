@@ -34,10 +34,8 @@ from app.providers.queue.base import JobQueue
 from app.providers.queue.factory import build_job_queue
 from app.providers.vector_store.base import VectorStore
 from app.providers.vector_store.factory import build_vector_store
-from app.repositories.audit_repository import AuditRepository
-from app.repositories.job_repository import JobRepository
-from app.repositories.memory_repository import MemoryRepository
-from app.repositories.mongo import MongoDatabase
+from app.repositories.base import AuditRepository, Database, JobRepository, MemoryRepository
+from app.repositories.factory import build_repositories
 
 logger = get_logger(__name__)
 
@@ -46,7 +44,7 @@ logger = get_logger(__name__)
 class DreamContainer:
     settings: Settings
 
-    database: MongoDatabase
+    database: Database
     memories: MemoryRepository
     audit: AuditRepository
     jobs: JobRepository
@@ -73,12 +71,12 @@ class DreamContainer:
         cls,
         settings: Settings | None = None,
         *,
-        database: MongoDatabase | None = None,
+        database: Database | None = None,
         embeddings: EmbeddingProvider | None = None,
         llm: LLMProvider | None = None,
         vectors: VectorStore | None = None,
         queue: JobQueue | None = None,
-        ensure_indexes: bool = True,
+        ensure_schema: bool = True,
     ) -> DreamContainer:
         """Build the whole object graph.
 
@@ -90,15 +88,19 @@ class DreamContainer:
         if settings.otel_enabled and metrics.enable_otel(settings.service_name):
             logger.info("otel_metrics_enabled")
 
-        database = database or MongoDatabase.connect(settings)
-        if ensure_indexes:
-            await database.ensure_indexes()
+        # One call covers both backends: `database` overrides the connection
+        # (that is how tests inject mongomock), and the repositories that match
+        # it are chosen from the connection itself rather than from config.
+        repositories = await build_repositories(settings, database=database)
+        database = repositories.database
+        if ensure_schema:
+            await database.ensure_schema()
 
         from app.core.auth import ApiKeyRegistry
 
-        memories = MemoryRepository(database)
-        audit = AuditRepository(database)
-        jobs = JobRepository(database)
+        memories = repositories.memories
+        audit = repositories.audit
+        jobs = repositories.jobs
 
         embeddings = embeddings or build_embedding_provider(settings)
         llm = llm or build_llm_provider(settings)
@@ -184,6 +186,7 @@ class DreamContainer:
 
         logger.info(
             "container_ready",
+            database_provider=database.name,
             llm_provider=settings.llm_provider,
             embedding_provider=settings.embedding_provider,
             vector_provider=vectors.name,
@@ -202,9 +205,9 @@ class DreamContainer:
 
         try:
             await self.database.ping()
-            checks["mongodb"] = {"ok": True}
+            checks["database"] = {"ok": True, "provider": self.database.name}
         except Exception as exc:  # noqa: BLE001
-            checks["mongodb"] = {"ok": False, "error": str(exc)[:200]}
+            checks["database"] = {"ok": False, "provider": self.database.name, "error": str(exc)[:200]}
 
         try:
             checks["vector_store"] = {

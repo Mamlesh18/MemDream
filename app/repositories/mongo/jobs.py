@@ -16,10 +16,11 @@ from app.models.dream import DreamJob
 from app.models.enums import JobStatus
 from app.models.memory import utcnow
 from app.models.scope import MemoryScope
-from app.repositories.mongo import MongoDatabase
+from app.repositories.base import JobRepository
+from app.repositories.mongo.database import MongoDatabase
 
 
-class JobRepository:
+class MongoJobRepository(JobRepository):
     def __init__(self, database: MongoDatabase) -> None:
         self._db = database
 

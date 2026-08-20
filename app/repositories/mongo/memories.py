@@ -24,12 +24,13 @@ from app.core.logging import get_logger
 from app.models.enums import MemoryStatus, MemoryType, RelationType
 from app.models.memory import Memory, MemoryRelation, utcnow
 from app.models.scope import MemoryScope
-from app.repositories.mongo import MongoDatabase
+from app.repositories.base import MemoryRepository
+from app.repositories.mongo.database import MongoDatabase
 
 logger = get_logger(__name__)
 
 
-class MemoryRepository:
+class MongoMemoryRepository(MemoryRepository):
     def __init__(self, database: MongoDatabase) -> None:
         self._db = database
 
@@ -413,22 +414,44 @@ class MemoryRepository:
         return [Memory.from_document(self._guard(scope, doc)) async for doc in cursor]
 
     async def distinct_scopes(self, limit: int = 10000) -> list[dict[str, str]]:
-        """Every (client, bot, user) triple that has memories.
+        """Every partition that has memories, with a row count.
 
         Drives scheduled synthesis, which must walk users without being told who
         they are.
+
+        Grouped on `scopeKey` rather than on the individual dimensions. Those are
+        optional and one of them (`namespace`) is a sub-document, so grouping on
+        them would either miss a dimension or split one partition across several
+        rows — and a caller rebuilding a scope from an incomplete triple would
+        compute a `scopeKey` that matches nothing.
         """
         pipeline = [
             {
                 "$group": {
-                    "_id": {"clientId": "$clientId", "botId": "$botId", "userId": "$userId"},
+                    "_id": "$scopeKey",
+                    "userId": {"$first": "$userId"},
+                    "agentId": {"$first": "$agentId"},
+                    "clientId": {"$first": "$clientId"},
+                    "namespace": {"$first": "$namespace"},
                     "count": {"$sum": 1},
                 }
             },
             {"$limit": limit},
         ]
         cursor = self._db.memories.aggregate(pipeline)
-        return [{**doc["_id"], "count": doc["count"]} async for doc in cursor]
+        return [
+            {
+                "scopeKey": doc["_id"],
+                "userId": doc.get("userId"),
+                "agentId": doc.get("agentId"),
+                "clientId": doc.get("clientId"),
+                "namespace": doc.get("namespace") or {},
+                "count": doc["count"],
+                # Previous name for agentId, kept so existing callers work.
+                "botId": doc.get("agentId"),
+            }
+            async for doc in cursor
+        ]
 
     # --- relations -------------------------------------------------------------- #
 

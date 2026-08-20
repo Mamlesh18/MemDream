@@ -20,7 +20,7 @@ from app.core.logging import get_logger
 from app.models.enums import MemoryStatus, MemoryType
 from app.models.memory import Memory, utcnow
 from app.models.scope import MemoryScope
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import MemoryRepository
 
 logger = get_logger(__name__)
 

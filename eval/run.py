@@ -200,7 +200,7 @@ class Harness:
             database=database,
             vectors=InMemoryVectorStore(),
             queue=InlineJobQueue(),
-            ensure_indexes=False,
+            ensure_schema=False,
         )
 
     @staticmethod

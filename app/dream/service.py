@@ -16,8 +16,7 @@ from app.models.enums import JobStatus
 from app.models.memory import utcnow
 from app.models.scope import MemoryScope
 from app.providers.queue.base import JobQueue
-from app.repositories.job_repository import JobRepository
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import JobRepository, MemoryRepository
 
 logger = get_logger(__name__)
 

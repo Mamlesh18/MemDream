@@ -226,7 +226,7 @@ async def test_supersede_disabled_falls_back_to_add(
         embeddings=embeddings,
         vectors=InMemoryVectorStore(),
         queue=InlineJobQueue(),
-        ensure_indexes=False,
+        ensure_schema=False,
     )
 
     memory = await container.memories.insert(

@@ -377,15 +377,31 @@ class Settings(BaseSettings):
     api_key_require_binding: bool = False
 
     # --- storage ---------------------------------------------------------- #
+    #
+    # The canonical store: memories, edges, audit rows and jobs. `mongodb` is
+    # the default because MemDream was designed against a document store — an
+    # open memory-type vocabulary and nested metadata need no migration there.
+    # `postgres` exists because most teams already run one, and pairing it with
+    # the pgvector store means MemDream needs exactly one piece of
+    # infrastructure. Behaviour is identical either way, and
+    # tests/test_repository_conformance.py is what makes that a fact rather
+    # than a claim.
+    database_provider: Literal["mongodb", "postgres"] = "mongodb"
+
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_database: str = "memdream"
 
+    #: Connections held open per process. The API and the worker each hold their
+    #: own pool, so budget for both against the server's max_connections.
+    postgres_pool_size: int = 10
+
     redis_url: str = "redis://localhost:6379/0"
-    #: ``mongo``  — the jobs collection is the queue. No broker. Default, because
-    #:              it makes MongoDB the only infrastructure MemDream needs.
-    #: ``arq``    — Redis-backed, lower claim latency, for high throughput.
-    #: ``inline`` — runs in the API process. Dev and demos only.
-    queue_provider: Literal["mongo", "arq", "inline"] = "mongo"
+    #: ``database`` — the jobs table is the queue. No broker. Default, because
+    #:                it makes the canonical store the only infrastructure
+    #:                MemDream needs. ``mongo`` is the previous spelling.
+    #: ``arq``      — Redis-backed, lower claim latency, for high throughput.
+    #: ``inline``   — runs in the API process. Dev and demos only.
+    queue_provider: Literal["database", "mongo", "arq", "inline"] = "database"
 
     vector_provider: Literal[
         "faiss", "memory", "qdrant", "pgvector", "chroma", "pinecone", "milvus",
@@ -407,6 +423,10 @@ class Settings(BaseSettings):
     qdrant_collection: str = "memdream"
 
     #: postgresql://user:pass@host:5432/db
+    #:
+    #: Shared by the `postgres` canonical store and the `pgvector` vector store.
+    #: Pointing both at the same database is the intended setup: one server, one
+    #: backup, and memories and their vectors in the same transaction domain.
     postgres_dsn: str = ""
     pgvector_table: str = "memdream_vectors"
 

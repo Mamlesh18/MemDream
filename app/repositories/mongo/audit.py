@@ -18,12 +18,13 @@ from pymongo import DESCENDING
 from app.core.logging import get_logger
 from app.models.dream import DreamOperation
 from app.models.scope import MemoryScope
-from app.repositories.mongo import MongoDatabase
+from app.repositories.base import AuditRepository
+from app.repositories.mongo.database import MongoDatabase
 
 logger = get_logger(__name__)
 
 
-class AuditRepository:
+class MongoAuditRepository(AuditRepository):
     def __init__(self, database: MongoDatabase) -> None:
         self._db = database
 

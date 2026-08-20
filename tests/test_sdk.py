@@ -57,7 +57,7 @@ async def test_health(sdk):
 
 async def test_ready_lists_dependencies(sdk):
     checks = (await sdk.ready())["checks"]
-    assert "mongodb" in checks
+    assert "database" in checks
 
 
 async def test_add_returns_a_typed_result(sdk):

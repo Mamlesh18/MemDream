@@ -46,6 +46,9 @@ dependencies = [
 # the others: pip install memdream[qdrant]
 qdrant = ["qdrant-client>=1.9"]
 pgvector = ["asyncpg>=0.29"]
+# The canonical store on Postgres. Same driver as the pgvector backend, so
+# running both against one database costs no extra dependency.
+postgres = ["asyncpg>=0.29"]
 chroma = ["chromadb>=0.5"]
 pinecone = ["pinecone>=5.0"]
 milvus = ["pymilvus>=2.4"]

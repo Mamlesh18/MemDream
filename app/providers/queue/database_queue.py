@@ -1,4 +1,4 @@
-"""MongoDB-backed job queue — no broker required.
+"""The canonical store *is* the queue — no broker required.
 
 Synthesis has two properties that make a dedicated message broker unnecessary:
 
@@ -6,18 +6,21 @@ Synthesis has two properties that make a dedicated message broker unnecessary:
 pattern, not two.
 
 **Its trigger is derivable from durable state.** "This user has N new memories
-since their last synthesis" is a fact sitting in MongoDB, not an event you can
-miss.
+since their last synthesis" is a fact sitting in the database, not an event you
+can miss.
 
 Together those mean a lost job costs nothing: the condition that caused it is
 still true, so it is re-created on the next write. That is the opposite of, say,
 a payment webhook, where losing the message loses money — which is what delivery
 guarantees are actually for.
 
-So the queue is a collection you already have. Workers claim jobs with a single
-atomic `find_one_and_update`, which is a compare-and-swap: two workers polling at
-the same instant cannot claim the same row, because the second one's filter no
-longer matches.
+So the queue is a table you already have. Claiming is `JobRepository.claim_next`,
+which every backend implements atomically — a compare-and-swap on MongoDB,
+`FOR UPDATE SKIP LOCKED` on Postgres. Two workers polling at the same instant
+cannot claim the same row either way.
+
+That is also why this queue is not named after a database: it holds a
+`JobRepository`, so it works with whichever canonical store is configured.
 
 Trade-off against ARQ: claim latency is one poll interval rather than
 milliseconds. For work measured in seconds and scheduled in hours, that does not
@@ -33,12 +36,12 @@ import socket
 from app.core.logging import get_logger
 from app.models.dream import DreamJob
 from app.providers.queue.base import JobQueue
-from app.repositories.job_repository import JobRepository
+from app.repositories.base import JobRepository
 
 logger = get_logger(__name__)
 
 
-class MongoJobQueue(JobQueue):
+class DatabaseJobQueue(JobQueue):
     """Enqueue by inserting a row; the worker polls and claims."""
 
     def __init__(self, jobs: JobRepository, *, poll_interval: float = 5.0) -> None:
@@ -71,7 +74,7 @@ class MongoJobQueue(JobQueue):
         `handler` takes a `DreamJob`. Failures are logged and the loop continues:
         one bad job must not stop the queue.
         """
-        logger.info("mongo_queue_worker_started", worker=self._worker_id)
+        logger.info("queue_worker_started", worker=self._worker_id)
         while stop is None or not stop.is_set():
             try:
                 job = await self.claim_next()
@@ -103,3 +106,7 @@ class MongoJobQueue(JobQueue):
             return True
         except Exception:  # noqa: BLE001
             return False
+
+
+#: Previous name, from when MongoDB was the only canonical store.
+MongoJobQueue = DatabaseJobQueue

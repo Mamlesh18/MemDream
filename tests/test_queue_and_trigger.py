@@ -104,10 +104,10 @@ async def test_claim_returns_none_when_the_queue_is_empty(container):
     assert await container.jobs.claim_next("worker-1") is None
 
 
-async def test_mongo_queue_enqueue_is_a_no_op_because_the_row_is_the_queue(container, scope):
-    from app.providers.queue.mongo_queue import MongoJobQueue
+async def test_database_queue_enqueue_is_a_no_op_because_the_row_is_the_queue(container, scope):
+    from app.providers.queue.database_queue import DatabaseJobQueue
 
-    queue = MongoJobQueue(container.jobs)
+    queue = DatabaseJobQueue(container.jobs)
     job = await _job(container, scope, JobStatus.QUEUED)
 
     assert await queue.enqueue_synthesis(job) == job.job_id

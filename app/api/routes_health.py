@@ -15,7 +15,7 @@ router = APIRouter(tags=["health"])
 @router.get("/health", response_model=HealthResponse, summary="Liveness")
 async def health() -> HealthResponse:
     """Liveness only — the process is up. Does not touch dependencies, so an
-    orchestrator will not restart the service because Mongo blipped."""
+    orchestrator will not restart the service because the database blipped."""
     return HealthResponse(status="ok", version=__version__)
 
 
@@ -28,7 +28,10 @@ async def ready(container: ContainerDep, response: Response) -> HealthResponse:
     """
     checks = await container.health()
 
-    hard_dependencies = ("mongodb", "vector_store")
+    # "database" rather than "mongodb": the canonical store is selectable,
+    # and a readiness probe keyed to one backend would report healthy on the
+    # other no matter what it was doing.
+    hard_dependencies = ("database", "vector_store")
     degraded = [
         name
         for name in hard_dependencies

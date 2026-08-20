@@ -116,7 +116,7 @@ async def container(settings, database, llm, embeddings) -> DreamContainer:
         queue=InlineJobQueue(),
         # mongomock's index support is partial and the suite does not depend on
         # index-backed performance.
-        ensure_indexes=bool(os.environ.get("DREAM_TEST_MONGODB_URI")),
+        ensure_schema=bool(os.environ.get("DREAM_TEST_MONGODB_URI")),
     )
     yield built
     await built.vectors.close()

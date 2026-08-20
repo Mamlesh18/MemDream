@@ -75,7 +75,7 @@ async def build(client_id: str = "client_demo"):
         database=MongoDatabase(AsyncMongoMockClient(tz_aware=True), "memdream_demo"),
         vectors=InMemoryVectorStore(),
         queue=InlineJobQueue(),
-        ensure_indexes=False,
+        ensure_schema=False,
     )
     scope = build_scope(
         client_id=client_id, bot_id=BOT, phone_number=PHONE, settings=settings

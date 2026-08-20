@@ -15,6 +15,7 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ProviderError
 from app.core.logging import get_logger
+from app.repositories.base import Database
 
 logger = get_logger(__name__)
 
@@ -30,8 +31,10 @@ JOBS = "dream_jobs"
 _SCOPE_KEYS = [("scopeKey", ASCENDING)]
 
 
-class MongoDatabase:
+class MongoDatabase(Database):
     """Owns the Motor client and exposes the four collections."""
+
+    name = "mongodb"
 
     def __init__(self, client: AsyncIOMotorClient, database_name: str) -> None:
         self._client = client
@@ -76,7 +79,7 @@ class MongoDatabase:
 
     # --- schema ------------------------------------------------------------- #
 
-    async def ensure_indexes(self) -> None:
+    async def ensure_schema(self) -> None:
         """Create indexes. Idempotent — safe to run on every boot."""
         await self.memories.create_indexes(
             [
@@ -137,6 +140,10 @@ class MongoDatabase:
             ]
         )
         logger.info("mongo_indexes_ready", database=self._db.name)
+
+    async def ensure_indexes(self) -> None:
+        """Previous name for `ensure_schema`, kept for existing callers."""
+        await self.ensure_schema()
 
     async def ping(self) -> dict[str, Any]:
         try:

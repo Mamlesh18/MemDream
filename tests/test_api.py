@@ -48,7 +48,7 @@ async def test_ready_reports_each_dependency(client):
     response = await client.get("/ready")
     assert response.status_code == 200
     checks = response.json()["checks"]
-    assert set(checks) >= {"mongodb", "vector_store", "queue", "embeddings", "llm"}
+    assert set(checks) >= {"database", "vector_store", "queue", "embeddings", "llm"}
 
 
 async def test_metrics_snapshot_is_served(client):

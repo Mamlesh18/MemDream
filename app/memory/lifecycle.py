@@ -25,7 +25,7 @@ from app.memory.retriever import MemoryRetriever
 from app.models.enums import MemoryStatus, RelationType
 from app.models.memory import Memory, utcnow
 from app.models.scope import MemoryScope
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import MemoryRepository
 
 logger = get_logger(__name__)
 

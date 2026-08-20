@@ -24,7 +24,7 @@ from app.models.memory import Memory, ScoredMemory, utcnow
 from app.models.scope import MemoryScope
 from app.providers.embeddings.base import EmbeddingProvider
 from app.providers.vector_store.base import VectorRecord, VectorStore
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import MemoryRepository
 
 logger = get_logger(__name__)
 

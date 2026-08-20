@@ -15,14 +15,16 @@ def build_job_queue(settings: Settings | None = None, jobs=None) -> JobQueue:
 
         return ArqJobQueue(settings.redis_url)
 
-    if name == "mongo":
-        from app.providers.queue.mongo_queue import MongoJobQueue
-        from app.repositories.job_repository import JobRepository
-        from app.repositories.mongo import get_database
+    # "mongo" is the previous spelling, from when MongoDB was the only store.
+    if name in ("database", "mongo"):
+        from app.providers.queue.database_queue import DatabaseJobQueue
 
         if jobs is None:
-            jobs = JobRepository(get_database(settings))
-        return MongoJobQueue(jobs)
+            raise ConfigurationError(
+                "The database queue needs a JobRepository. Build it through "
+                "DreamContainer.create, which already has one."
+            )
+        return DatabaseJobQueue(jobs)
 
     if name == "inline":
         from app.providers.queue.inline_queue import InlineJobQueue

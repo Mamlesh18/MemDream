@@ -92,9 +92,9 @@ async def main_async(args: argparse.Namespace) -> int:
         scopes = await container.memories.distinct_scopes()
 
         if args.client_id:
-            scopes = [s for s in scopes if s["clientId"] == args.client_id]
+            scopes = [s for s in scopes if s.get("clientId") == args.client_id]
         if args.bot_id:
-            scopes = [s for s in scopes if s["botId"] == args.bot_id]
+            scopes = [s for s in scopes if s.get("agentId") == args.bot_id]
         if args.user_id:
             scopes = [s for s in scopes if s["userId"] == args.user_id]
 
@@ -112,8 +112,14 @@ async def main_async(args: argparse.Namespace) -> int:
 
         indexed_total = skipped_total = 0
         for position, entry in enumerate(scopes, 1):
+            # Every dimension: a scope missing one computes a scopeKey that
+            # matches none of this user's memories, and the rebuild would
+            # silently index nothing.
             scope = MemoryScope(
-                client_id=entry["clientId"], bot_id=entry["botId"], user_id=entry["userId"]
+                user_id=entry["userId"],
+                agent_id=entry.get("agentId"),
+                client_id=entry.get("clientId"),
+                namespace=entry.get("namespace") or {},
             )
             indexed, skipped = await rebuild_scope(
                 container, scope, re_embed=args.re_embed, batch_size=args.batch_size

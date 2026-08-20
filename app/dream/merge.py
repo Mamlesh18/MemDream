@@ -26,7 +26,7 @@ from app.models.enums import DreamAction, MemoryStatus, MemoryType
 from app.models.memory import Memory, normalize_content
 from app.models.scope import MemoryScope
 from app.providers.llm.base import LLMProvider, LLMResult
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.base import MemoryRepository
 
 logger = get_logger(__name__)
 
