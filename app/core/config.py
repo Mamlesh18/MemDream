@@ -376,9 +376,48 @@ class Settings(BaseSettings):
     #: ``inline`` — runs in the API process. Dev and demos only.
     queue_provider: Literal["mongo", "arq", "inline"] = "mongo"
 
-    vector_provider: Literal["faiss", "memory"] = "faiss"
+    vector_provider: Literal[
+        "faiss", "memory", "qdrant", "pgvector", "chroma", "pinecone", "milvus",
+        "azure_search",
+    ] = "faiss"
     faiss_path: str = "./data/faiss"
     faiss_max_loaded_indexes: int = 128
+
+    # --- vector backends (only the selected one is read) ------------------- #
+    #
+    # Isolation differs per backend and is asserted for all of them by
+    # tests/test_vector_store_conformance.py:
+    #   pinecone            namespace per tenant   (hard partition)
+    #   qdrant/chroma/…     indexed scope filter   (soft)
+    #   pgvector            composite primary key  (enforced by the schema)
+
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str = ""
+    qdrant_collection: str = "memdream"
+
+    #: postgresql://user:pass@host:5432/db
+    postgres_dsn: str = ""
+    pgvector_table: str = "memdream_vectors"
+
+    #: Local persistence directory; set chroma_host instead for client/server.
+    chroma_path: str = "./data/chroma"
+    chroma_host: str = ""
+    chroma_port: int = 8000
+    chroma_collection: str = "memdream"
+
+    pinecone_api_key: str = ""
+    pinecone_index: str = "memdream"
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
+
+    #: An http(s) URL, or a local file path to use Milvus Lite with no server.
+    milvus_uri: str = "http://localhost:19530"
+    milvus_token: str = ""
+    milvus_collection: str = "memdream"
+
+    azure_search_endpoint: str = ""
+    azure_search_api_key: str = ""
+    azure_search_index: str = "memdream"
 
     # --- providers -------------------------------------------------------- #
     #

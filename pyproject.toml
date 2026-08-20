@@ -42,6 +42,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Vector backends. Each is lazily imported, so installing one costs nothing for
+# the others: pip install memdream[qdrant]
+qdrant = ["qdrant-client>=1.9"]
+pgvector = ["asyncpg>=0.29"]
+chroma = ["chromadb>=0.5"]
+pinecone = ["pinecone>=5.0"]
+milvus = ["pymilvus>=2.4"]
+azure-search = ["azure-search-documents>=11.5", "azure-core>=1.30"]
+
 otel = [
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",

@@ -17,6 +17,7 @@ suite stays useful on a laptop with nothing installed. Run the full matrix with:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from collections.abc import AsyncIterator
@@ -101,7 +102,9 @@ async def _chroma_store() -> AsyncIterator[VectorStore]:
     pytest.importorskip("chromadb", reason="chromadb not installed")
     from app.providers.vector_store.chroma_store import ChromaVectorStore
 
-    with tempfile.TemporaryDirectory() as directory:
+    # ignore_cleanup_errors: Chroma keeps its SQLite file open, and on Windows
+    # that blocks removal of the temp directory. A harness detail, not a defect.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         store = ChromaVectorStore(path=directory, collection="memdream_conformance")
         yield store
         await store.close()
@@ -135,12 +138,15 @@ STORES = {
 async def store(request) -> AsyncIterator[VectorStore]:
     async for instance in STORES[request.param]():
         # Start from a clean slate — a shared server keeps state between runs.
-        for scope in (scope_of(), scope_of(client="other"), scope_of(bot="sales"),
-                      scope_of(user="u2")):
-            try:
+        for scope in (
+            scope_of(),
+            scope_of(client="other"),
+            scope_of(client="globex"),
+            scope_of(bot="sales"),
+            scope_of(user="u2"),
+        ):
+            with contextlib.suppress(NotImplementedError):
                 await instance.clear(scope)
-            except NotImplementedError:
-                pass
         yield instance
 
 

@@ -19,6 +19,7 @@ Two details that are easy to get wrong and that the conformance suite checks:
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from app.core.exceptions import ProviderError
@@ -87,15 +88,14 @@ class QdrantVectorStore(VectorStore):
             logger.info("qdrant_collection_created", collection=self._collection)
 
         # Indexed, because this filter runs on every single search.
-        for field in ("client_id", "bot_id", "user_id"):
-            try:
+        for field in ("client_id", "bot_id", "user_id", "memory_id"):
+            # "already exists" is the normal outcome after first boot.
+            with contextlib.suppress(Exception):
                 await self._client.create_payload_index(
                     collection_name=self._collection,
                     field_name=field,
                     field_schema=models.PayloadSchemaType.KEYWORD,
                 )
-            except Exception:  # noqa: BLE001 - already exists is the normal case
-                pass
 
         self._ready = True
 
