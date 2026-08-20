@@ -384,11 +384,32 @@ arq app.workers.synthesis_worker.WorkerSettings
 
 | Layer | Shipped | Interface |
 |---|---|---|
-| LLM | Azure OpenAI, offline fake | `app/providers/llm/base.py` |
-| Embeddings | Azure OpenAI (`text-embedding-3-small`), offline fake | `app/providers/embeddings/base.py` |
+| LLM | Azure OpenAI · OpenAI · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint · offline fake | `app/providers/llm/base.py` |
+| Embeddings | Azure OpenAI · OpenAI · Ollama · any OpenAI-compatible endpoint · offline fake | `app/providers/embeddings/base.py` |
 | Vector store | FAISS (per-tenant partitions), in-memory | `app/providers/vector_store/base.py` |
-| Queue | ARQ + Redis, inline | `app/providers/queue/base.py` |
+| Queue | **MongoDB (default, no broker)** · ARQ + Redis · inline | `app/providers/queue/base.py` |
 | Canonical store | MongoDB | `app/repositories/` |
+
+Switching provider is configuration, not code:
+
+```bash
+# fully local — no API key, no per-token cost
+DREAM_LLM_PROVIDER=ollama
+DREAM_EMBEDDING_PROVIDER=ollama
+
+# Groq for chat (fast, cheap), OpenAI for embeddings (Groq has no embeddings API)
+DREAM_LLM_PROVIDER=groq          GROQ_API_KEY=gsk_...
+DREAM_EMBEDDING_PROVIDER=openai  OPENAI_API_KEY=sk-...
+
+# your own vLLM / LiteLLM / proxy
+DREAM_LLM_PROVIDER=openai_compatible
+DREAM_OPENAI_BASE_URL=http://vllm.internal/v1
+DREAM_OPENAI_CHAT_MODEL=mistral-7b
+```
+
+OpenAI, Groq, Ollama, Together and Fireworks all speak the same wire protocol,
+so they are one implementation with a preset table — and they need no extra
+dependency beyond the `openai` package already installed.
 
 Nothing in `app/memory` or `app/dream` imports a concrete provider — they take the
 base classes. Adding OpenAI, Ollama, Qdrant, pgvector or Celery is an adapter plus

@@ -15,6 +15,11 @@ def build_llm_provider(settings: Settings | None = None) -> LLMProvider:
 
         return from_settings(settings)
 
+    if name in ("openai", "groq", "ollama", "together", "fireworks", "openai_compatible"):
+        from app.providers.llm.openai_compatible import from_settings
+
+        return from_settings(settings, name)
+
     if name == "fake":
         from app.providers.llm.fake import FakeLLMProvider
 

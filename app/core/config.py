@@ -381,8 +381,17 @@ class Settings(BaseSettings):
     faiss_max_loaded_indexes: int = 128
 
     # --- providers -------------------------------------------------------- #
-    llm_provider: Literal["azure_openai", "fake"] = "azure_openai"
-    embedding_provider: Literal["azure_openai", "fake"] = "azure_openai"
+    #
+    # LLM and embeddings are chosen independently on purpose: several services
+    # do chat but not embeddings (Groq, Anthropic), so "Groq for chat, OpenAI
+    # for embeddings" is a normal and common pairing.
+    llm_provider: Literal[
+        "azure_openai", "openai", "groq", "ollama", "together", "fireworks",
+        "openai_compatible", "fake",
+    ] = "azure_openai"
+    embedding_provider: Literal[
+        "azure_openai", "openai", "ollama", "openai_compatible", "fake"
+    ] = "azure_openai"
 
     # Read from the *unprefixed* `AZURE_OPENAI_*` names — the conventional
     # spelling, and what every Azure tutorial and `.env.example` uses. Without
@@ -423,6 +432,22 @@ class Settings(BaseSettings):
             "AZURE_OPENAI_EMBEDDING_DIMENSIONS", "DREAM_AZURE_OPENAI_EMBEDDING_DIMENSIONS"
         ),
     )
+
+    # --- OpenAI-compatible endpoints -------------------------------------- #
+    #
+    # Shared by openai / groq / ollama / together / fireworks. Leave blank to
+    # accept the preset for the chosen provider; set to override. The
+    # unprefixed OPENAI_API_KEY is also read, since that is what everyone
+    # already has exported.
+    openai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("DREAM_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
+    openai_base_url: str = ""
+    openai_chat_model: str = ""
+    openai_embedding_model: str = ""
+    #: 0 means "use the preset default for this provider".
+    openai_embedding_dimensions: int = 0
 
     # --- privacy ---------------------------------------------------------- #
     identity_salt: str = "dream-memory-default-salt"

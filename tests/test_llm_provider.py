@@ -112,21 +112,23 @@ async def test_schema_hint_is_compact_and_complete():
 # --------------------------------------------------------------------------- #
 
 
-class _StubAzureProvider:
-    """Exercises `AzureOpenAILLMProvider.generate_json` with `_call` stubbed.
+class _StubProvider:
+    """Exercises the shared `generate_json` with `_call` stubbed.
 
-    Constructed without touching the real class's `__init__`, so no openai client
-    or credentials are involved — the transport is the part being replaced.
+    Targets `OpenAIStyleLLMProvider` — the base every OpenAI-wire-compatible
+    provider inherits — rather than one concrete subclass, because the retry and
+    repair logic under test is the shared code, not Azure's client construction.
     """
 
     @staticmethod
     def build(responses: list[str]):
         from app.core.config import LLMSettings
-        from app.providers.llm.azure_openai import AzureOpenAILLMProvider
+        from app.providers.llm._openai_style import OpenAIStyleLLMProvider
 
-        provider = AzureOpenAILLMProvider.__new__(AzureOpenAILLMProvider)
+        provider = OpenAIStyleLLMProvider.__new__(OpenAIStyleLLMProvider)
         provider._settings = LLMSettings()
-        provider._deployment = "test-deployment"
+        provider._model = "test-model"
+        provider._label = "test"
         provider._supports_json_mode = True
         provider._client = None
 
@@ -141,7 +143,7 @@ class _StubAzureProvider:
 
 
 async def test_valid_first_response_needs_no_repair():
-    provider, calls = _StubAzureProvider.build(['{"action": "ADD", "reason": "new"}'])
+    provider, calls = _StubProvider.build(['{"action": "ADD", "reason": "new"}'])
 
     result = await provider.generate_json(
         system="s", user="u", response_model=DreamDecision
@@ -153,7 +155,7 @@ async def test_valid_first_response_needs_no_repair():
 
 
 async def test_invalid_first_response_is_repaired():
-    provider, calls = _StubAzureProvider.build(
+    provider, calls = _StubProvider.build(
         [
             '{"action": "NOT_AN_ACTION"}',        # fails validation
             '{"action": "ADD", "reason": "ok"}',  # repaired
@@ -179,7 +181,7 @@ async def test_invalid_first_response_is_repaired():
 
 
 async def test_two_bad_responses_raise_rather_than_returning_garbage():
-    provider, _ = _StubAzureProvider.build(
+    provider, _ = _StubProvider.build(
         ['{"action": "NOPE"}', '{"action": "STILL_NOPE"}']
     )
 
@@ -188,7 +190,7 @@ async def test_two_bad_responses_raise_rather_than_returning_garbage():
 
 
 async def test_unparseable_first_response_is_also_repaired():
-    provider, calls = _StubAzureProvider.build(
+    provider, calls = _StubProvider.build(
         ["I'm sorry, I can't do that.", '{"action": "NOOP", "reason": "fine"}']
     )
 
@@ -202,7 +204,7 @@ async def test_unparseable_first_response_is_also_repaired():
 
 
 async def test_system_message_carries_the_schema_contract():
-    provider, calls = _StubAzureProvider.build(['{"action": "ADD"}'])
+    provider, calls = _StubProvider.build(['{"action": "ADD"}'])
 
     await provider.generate_json(
         system="You decide things.", user="{}", response_model=DreamDecision
