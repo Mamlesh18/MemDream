@@ -110,7 +110,7 @@ not something a filtering bug can cause — it is unrepresentable.
 **Explainable.** Every operation writes an audit row, `NOOP` included. *"Why was
 nothing remembered?"* is the question you will actually have, and it has an answer.
 
-Full detail: [`docs/how-it-works.md`](docs/how-it-works.md) ·
+Diagrams: [`docs/diagrams.md`](docs/diagrams.md) · Full detail: [`docs/how-it-works.md`](docs/how-it-works.md) ·
 [`docs/architecture.md`](docs/architecture.md)
 
 ---
@@ -135,10 +135,17 @@ python -m venv .venv
 .venv/Scripts/activate          # Windows
 source .venv/bin/activate       # macOS / Linux
 
-pip install -e ".[dev]"
-cp .env.example .env            # fill in AZURE_OPENAI_*
+pip install -r requirements.txt          # or: pip install .
+cp .env.example .env                     # fill in AZURE_OPENAI_*
 
 uvicorn app.main:app --reload
+```
+
+For development, add the test and lint tooling:
+
+```bash
+pip install -r requirements-dev.txt      # or: pip install -e ".[dev]"
+pytest
 ```
 
 MemDream needs **MongoDB**. Redis and a second worker process are only needed for
@@ -442,6 +449,7 @@ down by operation, and per-user at `GET /v1/dream/stats`.
 
 | | |
 |---|---|
+| [`docs/diagrams.md`](docs/diagrams.md) | Architecture diagrams — start here |
 | [`docs/how-it-works.md`](docs/how-it-works.md) | Technical walkthrough with code references |
 | [`docs/architecture.md`](docs/architecture.md) | Why each decision went the way it did |
 | [`docs/api.md`](docs/api.md) | Endpoint reference |

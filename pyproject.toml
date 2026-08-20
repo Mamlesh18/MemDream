@@ -67,7 +67,7 @@ Issues = "https://github.com/your-org/memdream/issues"
 memdream-eval = "eval.run:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app", "sdk/memdream"]
+packages = ["app", "memdream"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

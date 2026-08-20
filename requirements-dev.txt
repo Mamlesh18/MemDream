@@ -1,0 +1,23 @@
+# MemDream — development and test dependencies
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# The suite runs fully offline: mongomock-motor stands in for MongoDB, and the
+# fake LLM and embedding providers mean no API key and no network are needed.
+
+-r requirements.txt
+
+# --- tests -------------------------------------------------------------------
+pytest>=8.2
+pytest-asyncio>=0.23
+pytest-cov>=5.0
+anyio>=4.4
+# In-memory MongoDB, so `pytest` needs no running database.
+mongomock-motor>=0.0.29
+
+# --- linting and typing ------------------------------------------------------
+ruff>=0.5
+mypy>=1.10
+
+# --- optional: token counting for scripts/calibrate-style measurements -------
+# tiktoken>=0.7

@@ -31,7 +31,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sdk"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from memdream import DreamClient
 from memdream.exceptions import DreamError

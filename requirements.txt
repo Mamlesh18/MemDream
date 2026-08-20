@@ -1,0 +1,45 @@
+# MemDream — runtime dependencies
+#
+# pyproject.toml is the source of truth; this file mirrors it for anyone who
+# prefers `pip install -r`. Either works:
+#
+#     pip install -r requirements.txt
+#     pip install .
+#
+# Version floors, not pins. This is a library as well as a service, so pinning
+# exact versions here would force them on anything that installs alongside it.
+# For a reproducible deployment, pin in your own lock file or let Docker do it.
+
+# --- web layer ---------------------------------------------------------------
+fastapi>=0.111
+uvicorn[standard]>=0.30
+
+# --- models and configuration ------------------------------------------------
+pydantic>=2.7
+pydantic-settings>=2.3
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# --- MongoDB: canonical store ------------------------------------------------
+motor>=3.4
+pymongo>=4.7
+
+# --- FAISS: vector index -----------------------------------------------------
+# faiss-cpu ships manylinux/macOS/Windows wheels. On Linux it needs libgomp1 at
+# runtime, which the Dockerfile installs.
+faiss-cpu>=1.8
+numpy>=1.26
+
+# --- providers ---------------------------------------------------------------
+openai>=1.40
+httpx>=0.27
+
+# --- background worker -------------------------------------------------------
+arq>=0.26
+redis>=5.0
+
+# --- operational -------------------------------------------------------------
+structlog>=24.1
+tenacity>=8.3
+# Cross-process lock guarding FAISS writes between the API and the worker.
+filelock>=3.14
