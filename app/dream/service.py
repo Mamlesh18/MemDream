@@ -1,7 +1,7 @@
 """Dream job orchestration: create, queue, run, report.
 
 The job row in Mongo is authoritative. The queue only ever carries a job id, so
-status is answerable whether the broker is ARQ, Celery or nothing at all, and a
+status is answerable whether synthesis runs in this process or another, and a
 flushed queue loses scheduling but never the record that work was requested.
 """
 
@@ -45,6 +45,7 @@ class DreamService:
         *,
         wait: bool = False,
         force: bool = False,
+        min_memories: int | None = None,
         requested_by: str | None = None,
     ) -> DreamJob:
         """Queue (or run) a synthesis job for one user.
@@ -65,10 +66,13 @@ class DreamService:
                 )
                 return in_flight
 
+        # Options ride on the row, not on the call. With the `database` queue the
+        # process that runs this job is not the one that created it, so an
+        # argument would not survive the hop.
         job = DreamJob(
             **scope.as_model_fields(),
             requested_by=requested_by,
-            metadata={"force": force},
+            metadata={"force": force, "minMemories": min_memories},
         )
         await self._jobs.create(job)
 
@@ -169,7 +173,12 @@ class DreamService:
         await self._jobs.mark_running(job.job_id)
         job.status = JobStatus.RUNNING
 
-        job = await self._synthesis.run(job_scope, job, force=force or job.metadata.get("force", False))
+        job = await self._synthesis.run(
+            job_scope,
+            job,
+            force=force or job.metadata.get("force", False),
+            min_memories=job.metadata.get("minMemories"),
+        )
         await self._jobs.complete(job)
 
         logger.info(

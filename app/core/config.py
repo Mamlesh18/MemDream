@@ -201,10 +201,6 @@ class SynthesisSettings(BaseModel):
     #: Patterns below these bars are discarded rather than persisted.
     min_pattern_confidence: float = 0.55
     min_pattern_importance: float = 0.40
-    #: Cron schedule for the recurring worker job (arq cron; UTC).
-    schedule_cron: str = "0 3 * * *"
-    schedule_enabled: bool = False
-
     # --- automatic triggering ------------------------------------------- #
     #
     # Instead of sweeping every user on a timer — which wakes up for people who
@@ -225,6 +221,24 @@ class SynthesisSettings(BaseModel):
     #: A job with no progress for this long is treated as abandoned, so a dead
     #: worker cannot block a user's synthesis forever.
     job_stale_after_seconds: int = 900
+
+    # --- the in-process pool (DREAM_QUEUE_PROVIDER=inline) --------------- #
+
+    #: Synthesis jobs this process runs at once. Two is deliberate: the work is
+    #: LLM-bound, so the ceiling that matters is the provider's rate limit, not
+    #: the CPU. Distinct from `auto_trigger_max_concurrent`, which is a
+    #: deployment-wide gate read from the database and therefore also counts
+    #: jobs running on other replicas.
+    max_concurrent: int = 2
+    #: Jobs allowed to wait. Beyond this, new ones are failed immediately with a
+    #: reason rather than queued — a row sitting at `queued` reads as in-flight
+    #: and would block that user's next trigger for the whole stale timeout.
+    #: Since the trigger is derived from durable state, the next write re-queues.
+    max_queued: int = 100
+    #: How long shutdown waits for in-flight synthesis before abandoning it.
+    #: Long enough for a job that is nearly done, short enough not to hold a
+    #: deploy open.
+    drain_seconds: float = 30.0
 
 
 class DreamSettings(BaseModel):
@@ -395,13 +409,17 @@ class Settings(BaseSettings):
     #: own pool, so budget for both against the server's max_connections.
     postgres_pool_size: int = 10
 
-    redis_url: str = "redis://localhost:6379/0"
-    #: ``database`` — the jobs table is the queue. No broker. Default, because
-    #:                it makes the canonical store the only infrastructure
-    #:                MemDream needs. ``mongo`` is the previous spelling.
-    #: ``arq``      — Redis-backed, lower claim latency, for high throughput.
-    #: ``inline``   — runs in the API process. Dev and demos only.
-    queue_provider: Literal["database", "mongo", "arq", "inline"] = "database"
+    #: Where background synthesis runs. Note that *nothing on the user's path*
+    #: goes through here: remember, recall, supersede and merge are all
+    #: synchronous inside the API. This governs synthesis only.
+    #:
+    #: ``inline``   — a bounded pool of tasks in the API process. **Default**,
+    #:                because it is one service, no broker, nothing to deploy.
+    #: ``database`` — the jobs table is the queue, claimed by a separate worker
+    #:                process. For several API replicas sharing one queue, or
+    #:                when a job must survive a restart. ``mongo`` is the
+    #:                previous spelling.
+    queue_provider: Literal["inline", "embedded", "database", "mongo"] = "inline"
 
     vector_provider: Literal[
         "faiss", "memory", "qdrant", "pgvector", "chroma", "pinecone", "milvus",

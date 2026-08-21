@@ -33,7 +33,7 @@ async def trigger_synthesis(
     """
     scope = scope_from_request(body, principal, container.settings)
     job = await container.dream_service.request_synthesis(
-        scope, wait=body.wait, force=body.force
+        scope, wait=body.wait, force=body.force, min_memories=body.min_memories
     )
 
     return SynthesizeResponse(

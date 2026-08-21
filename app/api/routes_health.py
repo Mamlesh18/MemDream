@@ -34,8 +34,7 @@ async def ready(container: ContainerDep, response: Response) -> HealthResponse:
     The middle state is the one worth having. A broken queue means synthesis is
     dead while everything else works, and reporting that as `ok` sends you
     looking at the wrong thing when `POST /v1/dream/synthesize` starts
-    returning 502 — which is exactly what happens with `DREAM_QUEUE_PROVIDER=arq`
-    and no Redis running.
+    failing.
 
     Either way the body lists every check, so the answer never requires reading
     logs.

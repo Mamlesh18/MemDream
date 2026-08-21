@@ -1,7 +1,9 @@
 """The job queue contract.
 
-Kept deliberately thin — enqueue, health, close — so that swapping ARQ for
-Celery, RQ, Temporal, SQS, Service Bus or Kafka is an adapter, not a refactor.
+Kept deliberately thin — enqueue, health, close — so that adding Celery, RQ,
+Temporal, SQS, Service Bus or Kafka is an adapter, not a refactor. Two
+implementations ship: an in-process pool (the default) and the canonical
+store's own jobs table. Neither needs a broker.
 Job *state* is not part of this interface: it lives in Mongo, so status queries
 never depend on which broker is installed, and a job survives the queue being
 flushed.

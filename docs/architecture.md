@@ -419,8 +419,13 @@ few replicas, implement `VectorStore` against a vector *server* (Qdrant,
 pgvector, Azure AI Search) — the interface is four methods and every caller
 already passes a scope. Nothing else changes.
 
-**The worker.** ARQ rather than Celery because the stack is async end to end —
-Motor, httpx to Azure OpenAI, the FAISS thread offload. An ARQ worker runs the
+**The queue.** No broker, and not because one was hard to add — because the
+workload does not justify one. Synthesis is idempotent and its trigger is a
+durable fact rather than an event, so a lost job re-fires on the next write.
+That removes the only thing a broker guarantees. By default it runs in a bounded
+pool of tasks inside the API; `DREAM_QUEUE_PROVIDER=database` moves it to a
+worker process claiming rows from the jobs table, for deployments running
+several API replicas. A worker runs the
 same coroutines the API does, with no `asyncio.run()` bridge inside a sync task
 and no second code path to keep correct. `JobQueue` is four methods if you
 prefer Celery, SQS, Service Bus or Temporal.
@@ -456,10 +461,10 @@ app/
   dream/               engine, supersede, merge, synthesis, clustering,
                        candidate_selector, validation, prompts
   providers/           llm, embeddings, vector_store, queue — each with a base
-                       class, an Azure/FAISS/ARQ implementation, and an
+                       class, a concrete implementation, and an
                        offline implementation
   repositories/        Mongo access; every method takes a MemoryScope
-  workers/             ARQ worker and cron registration
+  workers/             optional worker for DREAM_QUEUE_PROVIDER=database
 ```
 
 `app/memory` and `app/dream` import provider **base classes** only. That is the

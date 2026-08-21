@@ -88,7 +88,14 @@ class SynthesisEngine:
 
     # --- entry point -------------------------------------------------------------- #
 
-    async def run(self, scope: MemoryScope, job: DreamJob, *, force: bool = False) -> DreamJob:
+    async def run(
+        self,
+        scope: MemoryScope,
+        job: DreamJob,
+        *,
+        force: bool = False,
+        min_memories: int | None = None,
+    ) -> DreamJob:
         """Execute one synthesis job, updating and returning the job record."""
         started = time.perf_counter()
         metrics.increment(SYNTHESIS_RUNS)
@@ -100,14 +107,16 @@ class SynthesisEngine:
             return job
 
         try:
-            candidates = await self._selector.select(scope)
+            candidates = await self._selector.select(scope, min_memories=min_memories)
             job.memories_analyzed = len(candidates.memories)
 
             if not candidates.has_enough:
                 job.status = JobStatus.SKIPPED
+                # Report the floor that was actually applied, which may be
+                # a per-run override rather than the configured default.
                 job.error = (
                     f"user has {candidates.total_active} active memories; "
-                    f"{self._config.min_memories} required"
+                    f"{candidates.required or self._config.min_memories} required"
                 )
                 return job
 

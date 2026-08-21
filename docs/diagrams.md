@@ -13,21 +13,18 @@ natively; paste any block into [mermaid.live](https://mermaid.live) to edit.
 flowchart TB
     Agent["Your agent<br/>LangChain · Semantic Kernel · custom loop"]
 
-    subgraph api["API process — uvicorn"]
-        Routes["REST API<br/>15 endpoints"]
+    subgraph api["API process — uvicorn. The whole deployment."]
+        Routes["REST API<br/>19 endpoints"]
         Engine["Dream Engine<br/>ADD · SUPERSEDE · MERGE · NOOP"]
         Retriever["Retriever<br/>filter then rank"]
         Lifecycle["Lifecycle<br/>the only writer of status"]
-    end
-
-    subgraph worker["Worker process — arq"]
+        Pool["Synthesis pool<br/>bounded background tasks"]
         Synth["Synthesis<br/>select · cluster · generalise"]
     end
 
     subgraph stores["Storage"]
-        Mongo[("MongoDB<br/><b>source of truth</b><br/>memories · relations<br/>audit · jobs")]
+        Mongo[("MongoDB or Postgres<br/><b>source of truth</b><br/>memories · relations<br/>audit · jobs")]
         Faiss[("FAISS<br/><b>derived index</b><br/>one partition per user")]
-        Redis[("Redis<br/>job ids only")]
     end
 
     subgraph providers["Swappable providers"]
@@ -48,8 +45,8 @@ flowchart TB
     Retriever -->|"1 - eligible ids"| Mongo
     Retriever -->|"2 - rank those ids"| Faiss
 
-    Routes -->|"job id"| Redis
-    Redis --> Synth
+    Routes -->|"job row, then a task"| Pool
+    Pool --> Synth
     Synth --> Mongo
     Synth -.-> LLM
 
@@ -57,11 +54,19 @@ flowchart TB
 
     classDef store fill:#1e293b,stroke:#475569,color:#e2e8f0
     classDef proc fill:#1e3a5f,stroke:#3b82f6,color:#e2e8f0
-    class Mongo,Faiss,Redis store
+    class Mongo,Faiss store
 ```
 
-**Key point:** MongoDB holds every embedding, so FAISS is disposable — delete it
-and rebuild. Redis carries only job IDs; all job *state* lives in Mongo.
+**Two key points.**
+
+The database holds every embedding, so FAISS is disposable — delete it and
+rebuild.
+
+There is no second process and no broker. Synthesis is detached from the request
+that triggered it by a bounded pool of tasks in the same process, which is all
+"background" has to mean when the work is idempotent and its trigger is a
+durable fact rather than an event. Set `DREAM_QUEUE_PROVIDER=database` to move
+it to a worker instead — for several API replicas sharing one queue.
 
 ---
 

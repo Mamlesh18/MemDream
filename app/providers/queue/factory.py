@@ -10,11 +10,6 @@ def build_job_queue(settings: Settings | None = None, jobs=None) -> JobQueue:
     settings = settings or get_settings()
     name = settings.queue_provider
 
-    if name == "arq":
-        from app.providers.queue.arq_queue import ArqJobQueue
-
-        return ArqJobQueue(settings.redis_url)
-
     # "mongo" is the previous spelling, from when MongoDB was the only store.
     if name in ("database", "mongo"):
         from app.providers.queue.database_queue import DatabaseJobQueue
@@ -26,9 +21,16 @@ def build_job_queue(settings: Settings | None = None, jobs=None) -> JobQueue:
             )
         return DatabaseJobQueue(jobs)
 
-    if name == "inline":
-        from app.providers.queue.inline_queue import InlineJobQueue
+    # "inline" runs synthesis in this process, in a bounded pool. Default,
+    # because it needs no second service and no broker.
+    if name in ("inline", "embedded"):
+        from app.providers.queue.inline_queue import EmbeddedJobQueue
 
-        return InlineJobQueue()
+        synthesis = settings.dream.synthesis
+        return EmbeddedJobQueue(
+            max_concurrent=synthesis.max_concurrent,
+            max_queued=synthesis.max_queued,
+            drain_seconds=synthesis.drain_seconds,
+        )
 
     raise ConfigurationError(f"Unknown queue provider: {name!r}")

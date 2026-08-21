@@ -1,30 +1,32 @@
-"""The background synthesis worker.
+"""The optional synthesis worker.
 
-Two ways to run it, matching the two queue providers:
+**You probably do not need this file.** By default synthesis runs inside the API
+process (`DREAM_QUEUE_PROVIDER=inline`), and the whole deployment is:
 
-    python -m app.workers.synthesis_worker            # DREAM_QUEUE_PROVIDER=database
-    arq app.workers.synthesis_worker.WorkerSettings   # DREAM_QUEUE_PROVIDER=arq
+    uvicorn app.main:app
 
-Both build the same `DreamContainer` the API does, so worker and API share one
-wiring path and one set of provider implementations.
+This worker exists for the one case that cannot answer: several API replicas
+sharing a single queue, where a job must be claimed exactly once and must
+survive the process that queued it restarting. Then:
 
-The first needs no broker: the `dream_jobs` table is the queue, and this process
-polls it, claiming one row at a time with an atomic compare-and-swap. **Something
-has to run it.** With `database` selected and no worker, `POST /v1/dream/synthesize`
-writes a job row that nobody ever picks up, and the caller polls a job stuck at
-`queued` — quieter than a connection error and more confusing. Use
-`DREAM_QUEUE_PROVIDER=inline` if you would rather not run a second process at
-all; synthesis then happens inside the API request.
+    DREAM_QUEUE_PROVIDER=database
+    uvicorn app.main:app                        # terminal 1, or N replicas
+    python -m app.workers.synthesis_worker      # terminal 2
 
-Two ways work arrives:
+Still no broker. The `dream_jobs` table *is* the queue, and this process claims
+rows from it with an atomic compare-and-swap — `find_one_and_update` on MongoDB,
+`FOR UPDATE SKIP LOCKED` on Postgres. Two workers polling at the same instant
+cannot claim the same job either way.
 
-* **On demand** — `POST /v1/dream/synthesize` enqueues a job.
-* **Scheduled** — an optional sweep walks every user with memories and
-  synthesises each in turn.
+It builds the same `DreamContainer` the API does, so there is one wiring path and
+one set of provider implementations, not two that can drift.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import signal
 from typing import Any
 
 from app.container import DreamContainer
@@ -37,48 +39,25 @@ logger = get_logger(__name__)
 
 
 # --------------------------------------------------------------------------- #
-# Tasks
+# The sweep
 # --------------------------------------------------------------------------- #
 
 
-async def run_synthesis_task(
-    ctx: dict[str, Any],
-    job_id: str,
-    client_id: str,
-    bot_id: str,
-    user_id: str,
-) -> dict[str, Any]:
-    """Run one synthesis job.
+async def synthesise_everyone(container: DreamContainer) -> dict[str, Any]:
+    """Walk every user with memories and synthesise each in turn.
 
-    Named to match `app.providers.queue.arq_queue.SYNTHESIS_TASK`.
+    Rarely needed: synthesis fires automatically once a user accumulates enough
+    new material, which covers the case a nightly sweep was invented for. This
+    is here for a backfill after changing the synthesis prompt or thresholds,
+    where you want every user re-evaluated at once.
+
+    Users are processed **sequentially**. Synthesis is a background nicety, and
+    a burst of parallel LLM calls would be the thing that rate-limits the
+    request path users are actually waiting on.
     """
-    container: DreamContainer = ctx["container"]
-    scope = MemoryScope(client_id=client_id, bot_id=bot_id, user_id=user_id)
-
-    with operation_context():
-        logger.info("synthesis_task_started", job_id=job_id, user_id=user_id)
-        job = await container.dream_service.run_job(job_id, scope)
-
-    return {
-        "jobId": job.job_id,
-        "status": job.status.value,
-        "patternsCreated": job.patterns_created,
-        "patternsUpdated": job.patterns_updated,
-        "memoriesAnalyzed": job.memories_analyzed,
-    }
-
-
-async def scheduled_synthesis(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Walk every user with memories and synthesise each.
-
-    Users are processed sequentially. Synthesis is a background nicety, and a
-    burst of parallel LLM calls would be the thing that rate-limits the request
-    path that users are actually waiting on.
-    """
-    container: DreamContainer = ctx["container"]
     scopes = await container.memories.distinct_scopes()
 
-    logger.info("scheduled_synthesis_started", users=len(scopes))
+    logger.info("sweep_started", users=len(scopes))
     processed = 0
     patterns_created = 0
     failed = 0
@@ -94,20 +73,18 @@ async def scheduled_synthesis(ctx: dict[str, Any]) -> dict[str, Any]:
         )
         try:
             job = await container.dream_service.request_synthesis(
-                scope, wait=True, requested_by="scheduler"
+                scope, wait=True, requested_by="sweep"
             )
             patterns_created += job.patterns_created
             processed += 1
         except Exception as exc:  # noqa: BLE001 - one user must not stop the sweep
             failed += 1
             logger.error(
-                "scheduled_synthesis_user_failed",
-                user_id=entry["userId"],
-                error=str(exc)[:300],
+                "sweep_user_failed", user_id=entry["userId"], error=str(exc)[:300]
             )
 
     logger.info(
-        "scheduled_synthesis_finished",
+        "sweep_finished",
         processed=processed,
         failed=failed,
         patterns_created=patterns_created,
@@ -116,101 +93,21 @@ async def scheduled_synthesis(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Worker lifecycle
-# --------------------------------------------------------------------------- #
-
-
-async def startup(ctx: dict[str, Any]) -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level, settings.log_json)
-    if settings.otel_enabled:
-        metrics.enable_otel(settings.service_name)
-    ctx["container"] = await DreamContainer.create(settings)
-    logger.info("synthesis_worker_ready")
-
-
-async def shutdown(ctx: dict[str, Any]) -> None:
-    container: DreamContainer | None = ctx.get("container")
-    if container is not None:
-        await container.close()
-    logger.info("synthesis_worker_stopped")
-
-
-def _redis_settings() -> Any:
-    from arq.connections import RedisSettings
-
-    return RedisSettings.from_dsn(get_settings().redis_url)
-
-
-def _build_cron_jobs() -> list:
-    """Register the scheduled sweep when it is enabled."""
-    settings = get_settings()
-    if not settings.dream.synthesis.schedule_enabled:
-        return []
-
-    from arq import cron
-
-    minute, hour, day, month, weekday = (
-        settings.dream.synthesis.schedule_cron.split() + ["*"] * 5
-    )[:5]
-
-    def _field(value: str) -> Any:
-        # arq wants None for "any" and an int for a fixed value. Ranges and step
-        # syntax are not supported here; use the queue's own scheduler for those.
-        return None if value == "*" else int(value)
-
-    return [
-        cron(
-            scheduled_synthesis,
-            minute=_field(minute),
-            hour=_field(hour),
-            day=_field(day),
-            month=_field(month),
-            weekday=_field(weekday),
-            run_at_startup=False,
-        )
-    ]
-
-
-class WorkerSettings:
-    """ARQ worker configuration."""
-
-    functions = [run_synthesis_task]
-    cron_jobs = _build_cron_jobs()
-
-    on_startup = startup
-    on_shutdown = shutdown
-
-    # Synthesis is LLM-bound, so a handful of concurrent jobs saturates the
-    # deployment's rate limit long before it saturates the worker.
-    max_jobs = 4
-    job_timeout = 900
-    keep_result = 3600
-    max_tries = 2
-
-    redis_settings = _redis_settings()
-
-
-# --------------------------------------------------------------------------- #
-# Broker-free worker
+# The worker loop
 # --------------------------------------------------------------------------- #
 
 
 async def run_forever() -> None:
     """Poll the canonical store for queued jobs and run them.
 
-    The counterpart to `DatabaseJobQueue`: that class writes and claims, this
-    one is the process doing the claiming. Everything about *how* a job is
-    claimed lives in the repository, so this stays a loop and a handler.
+    The counterpart to `DatabaseJobQueue`: that class writes and claims, this is
+    the process doing the claiming. Everything about *how* a job is claimed
+    lives in the repository, so this stays a loop and a handler.
 
-    Stops cleanly on SIGINT/SIGTERM: a job already in flight is allowed to
-    finish, because abandoning it would leave a row at `running` for the stale
-    timeout before anything could retry it.
+    Stops cleanly on SIGINT/SIGTERM, letting a job already in flight finish —
+    abandoning it would leave a row at `running` until the stale timeout, and
+    nothing could retry it in the meantime.
     """
-    import asyncio
-    import contextlib
-    import signal
-
     from app.providers.queue.database_queue import DatabaseJobQueue
 
     settings = get_settings()
@@ -223,14 +120,14 @@ async def run_forever() -> None:
 
     if not isinstance(queue, DatabaseJobQueue):
         # Refuse rather than start a loop that will never see a job. Silently
-        # idling here is how you end up debugging the API.
+        # idling here is how you end up debugging the API instead.
         await container.close()
         raise SystemExit(
-            f"This worker polls the canonical store, but DREAM_QUEUE_PROVIDER is "
-            f"{settings.queue_provider!r}.\n"
-            "  database  -> python -m app.workers.synthesis_worker  (this)\n"
-            "  arq       -> arq app.workers.synthesis_worker.WorkerSettings\n"
-            "  inline    -> no worker needed; synthesis runs in the API process"
+            f"This worker claims jobs from the canonical store, but "
+            f"DREAM_QUEUE_PROVIDER is {settings.queue_provider!r}.\n"
+            "  inline    -> no worker needed. Synthesis runs in the API process,\n"
+            "               which is the default and almost certainly what you want.\n"
+            "  database  -> python -m app.workers.synthesis_worker  (this)"
         )
 
     stop = asyncio.Event()
@@ -246,21 +143,21 @@ async def run_forever() -> None:
         with operation_context():
             logger.info("synthesis_task_started", job_id=job.job_id, user_id=job.user_id)
             # No scope argument: the job row is the authority on its own
-            # partition, and a worker holding only a job id has nothing
-            # better to offer.
+            # partition, and a worker holding only a job id has nothing better
+            # to offer.
             await container.dream_service.run_job(job.job_id)
 
     # A worker that died mid-job leaves its row at `running` forever. Clearing
     # those on startup is housekeeping, not correctness — `find_active_for_scope`
-    # already ignores them — but it means an operator sees `failed` with a
-    # reason rather than rows stuck in flight.
+    # already ignores them — but it means an operator sees `failed` with a reason
+    # rather than rows stuck in flight.
     reaped = await container.jobs.reap_stale(
         stale_after_seconds=settings.dream.synthesis.job_stale_after_seconds
     )
     if reaped:
         logger.warning("stale_jobs_reaped", count=reaped)
 
-    logger.info("synthesis_worker_ready", queue=queue.name, poll=True)
+    logger.info("synthesis_worker_ready", queue=queue.name)
     try:
         await queue.poll_forever(handle, stop=stop)
     finally:
@@ -268,10 +165,34 @@ async def run_forever() -> None:
         logger.info("synthesis_worker_stopped")
 
 
-def main() -> None:
-    import asyncio
+async def _sweep_once() -> None:
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_json)
+    container = await DreamContainer.create(settings)
+    try:
+        result = await synthesise_everyone(container)
+        print(
+            f"Swept {result['processed']} users, {result['patternsCreated']} patterns, "
+            f"{result['failed']} failed."
+        )
+    finally:
+        await container.close()
 
-    asyncio.run(run_forever())
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Claim and run queued synthesis jobs (DREAM_QUEUE_PROVIDER=database)."
+    )
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="synthesise every user once and exit, instead of polling",
+    )
+    args = parser.parse_args()
+
+    asyncio.run(_sweep_once() if args.sweep else run_forever())
 
 
 if __name__ == "__main__":

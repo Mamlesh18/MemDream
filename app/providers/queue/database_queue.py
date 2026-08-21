@@ -22,9 +22,9 @@ cannot claim the same row either way.
 That is also why this queue is not named after a database: it holds a
 `JobRepository`, so it works with whichever canonical store is configured.
 
-Trade-off against ARQ: claim latency is one poll interval rather than
-milliseconds. For work measured in seconds and scheduled in hours, that does not
-matter — and it removes an entire service from every deployment.
+Trade-off against `inline`: a second process to deploy. What you get for it is a
+queue shared across API replicas and a job that survives the process that
+queued it restarting. If you do not need either, do not run this.
 """
 
 from __future__ import annotations

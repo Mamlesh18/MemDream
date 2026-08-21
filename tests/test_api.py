@@ -2,7 +2,7 @@
 
 The app is built without its lifespan and the test container is injected
 directly, so these exercise routing, validation, serialisation and error
-translation without needing MongoDB, Redis or Azure.
+translation without needing a real MongoDB or Azure.
 """
 
 from __future__ import annotations
@@ -55,14 +55,14 @@ async def test_ready_reports_each_dependency(client):
 async def test_a_dead_queue_is_degraded_but_still_serving(client, container, monkeypatch):
     """The state that was missing, and the one that actually happens.
 
-    `DREAM_QUEUE_PROVIDER=arq` with no Redis kills synthesis and nothing else.
+    A queue that cannot reach its store kills synthesis and nothing else.
     Reporting that as `ok` sends you looking at the wrong thing when
-    `POST /v1/dream/synthesize` starts returning 502; reporting it as 503 would
-    pull a service out of rotation that can still read and write perfectly well.
+    `POST /v1/dream/synthesize` starts failing; reporting it as 503 would pull a
+    service out of rotation that can still read and write perfectly well.
     """
 
     async def dead(*_args, **_kwargs):
-        raise RuntimeError("Cannot connect to Redis at redis://localhost:6379/0")
+        raise RuntimeError("Cannot reach the jobs collection")
 
     monkeypatch.setattr(container.queue, "health_check", dead)
 
@@ -73,7 +73,7 @@ async def test_a_dead_queue_is_degraded_but_still_serving(client, container, mon
     assert body["status"] == "degraded"
     assert body["checks"]["queue"]["ok"] is False
     # Names the cause, so the answer does not require reading logs.
-    assert "Redis" in body["checks"]["queue"]["error"]
+    assert "jobs collection" in body["checks"]["queue"]["error"]
 
 
 async def test_a_dead_database_withholds_traffic(client, container, monkeypatch):
@@ -308,3 +308,29 @@ async def test_dream_stats_reports_counts_and_actions(client):
     body = response.json()
     assert body["counts"]["active"] >= 1
     assert body["actions"]
+
+
+async def test_synthesize_accepts_a_minimum_override(client):
+    """The console's `min` box. Lets synthesis be demonstrated on a small
+    account without changing the default for everyone."""
+    await client.post("/v1/memories", json={"prompt": "I cycle to work.", **scope_params()})
+
+    response = await client.post(
+        "/v1/dream/synthesize",
+        json={"wait": True, "force": True, "minMemories": 2, **scope_params()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["jobId"]
+
+
+async def test_a_minimum_below_two_is_refused(client):
+    """A "pattern" drawn from one memory is a restatement, not a
+    generalisation. The floor is a floor."""
+    response = await client.post(
+        "/v1/dream/synthesize",
+        json={"wait": True, "minMemories": 1, **scope_params()},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"

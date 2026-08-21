@@ -54,6 +54,21 @@
   .field input { width: 150px; font-family: var(--mono); font-size: 12px; }
 
   .status { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .inline-field {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel-2);
+  }
+  .inline-field label { font-size: 11px; color: var(--dim); text-transform: uppercase; }
+  .inline-field input {
+    width: 46px; border: none; background: transparent; padding: 5px 0;
+    color: var(--text); font: 12px var(--mono);
+  }
+  .inline-field input:focus { outline: none; }
+  .timing {
+    font: 11px/1.4 var(--mono); color: var(--dim);
+    text-align: right; margin-top: 4px;
+  }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
   .dot.ok  { background: var(--add);    box-shadow: 0 0 7px var(--add); }
   .dot.bad  { background: var(--danger);    box-shadow: 0 0 7px var(--danger); }
@@ -262,6 +277,10 @@
       <button id="btnAddManual" class="primary">+ Add memory</button>
       <button id="btnSearch">Search</button>
       <button id="btnDream">Run Dream</button>
+      <span class="inline-field" title="Active memories this user needs before synthesis will look for patterns. Blank uses the server default (20).">
+        <label for="minMemories">min</label>
+        <input id="minMemories" type="number" min="2" max="1000" placeholder="20">
+      </span>
       <button id="btnStats">Stats</button>
       <button id="btnTokens">Tokens &amp; cost</button>
       <button id="btnMetrics">Metrics</button>
@@ -305,6 +324,8 @@ const state = {
   // "not yet known" stays distinguishable from "known to be down".
   queueOk: undefined,
   queueProvider: "",
+  // Duration of the most recent API call, in ms. Set by call().
+  lastCallMs: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -354,6 +375,7 @@ async function call(method, path, body) {
     throw new Error(entry.error);
   } finally {
     entry.ms = Math.round(performance.now() - started);
+    state.lastCallMs = entry.ms;
     state.logs.unshift(entry);
     if (state.logs.length > 100) state.logs.pop();
     renderLog();
@@ -366,13 +388,22 @@ const api = {
   metrics:    ()            => call("GET",  "/v1/metrics"),
   tokens:     ()            => call("GET",  "/v1/metrics/tokens"),
   add:        (prompt)      => call("POST", "/v1/memories", { prompt, ...scope() }),
+  // Every call already records its own duration in state.logs; `lastCallMs`
+  // is a shortcut for the one that just finished, so the chat can show it
+  // without digging through the log.
   search:     (query, o)    => call("POST", "/v1/memories/search", { query, ...scope(), ...o }),
   list:       (p)           => call("GET",  `/v1/memories?${scopeQuery(p)}`),
   get:        (id)          => call("GET",  `/v1/memories/${id}?${scopeQuery()}`),
   history:    (id)          => call("GET",  `/v1/memories/${id}/history?${scopeQuery()}`),
   memAudit:   (id)          => call("GET",  `/v1/memories/${id}/audit?${scopeQuery()}`),
   auditLog:   (limit = 50)  => call("GET",  `/v1/memories/audit/operations?${scopeQuery({ limit })}`),
-  synthesize: ()            => call("POST", "/v1/dream/synthesize", { ...scope() }),
+  synthesize: (minMemories) => call("POST", "/v1/dream/synthesize", {
+                                 ...scope(),
+                                 // Omitted rather than sent as null, so a blank
+                                 // box means "use the server default" instead
+                                 // of "override with nothing".
+                                 ...(minMemories ? { minMemories } : {}),
+                               }),
   job:        (id)          => call("GET",  `/v1/dream/jobs/${id}?${scopeQuery()}`),
   jobs:       ()            => call("GET",  `/v1/dream/jobs?${scopeQuery()}`),
   stats:      ()            => call("GET",  `/v1/dream/stats?${scopeQuery()}`),
@@ -444,10 +475,15 @@ function renderMessages() {
     if (m.role === "user") return `<div class="msg-user">${esc(m.text)}</div>`;
     if (m.role === "error") return `<div class="decisions"><div class="card ERROR">
       <span class="tag ERROR">ERROR</span><div class="content">${esc(m.text)}</div></div></div>`;
+    const took = m.ms
+      ? `<div class="timing">${(m.ms / 1000).toFixed(2)}s${
+          m.results?.length > 1 ? ` · ${m.results.length} decisions` : ""}</div>`
+      : "";
+
     if (!m.results.length) return `<div class="decisions"><div class="card NOOP">
       <span class="tag NOOP">NOTHING STORED</span>
       <div class="why">No durable fact in that message — greetings, questions and small talk
-      are deliberately not remembered.</div></div></div>`;
+      are deliberately not remembered.</div>${took}</div></div>`;
 
     return `<div class="decisions">` + m.results.map((d) => `
       <div class="card ${esc(d.action)}">
@@ -457,7 +493,7 @@ function renderMessages() {
         ${d.supersededMemoryIds?.length ? `<div class="ids"><b>replaced:</b> ${d.supersededMemoryIds.map(esc).join(", ")}</div>` : ""}
         ${d.mergedMemoryIds?.length ? `<div class="ids"><b>absorbed:</b> ${d.mergedMemoryIds.map(esc).join(", ")}</div>` : ""}
         ${d.memoryId ? `<div class="ids">${esc(d.memoryId)}</div>` : ""}
-      </div>`).join("") + `</div>`;
+      </div>`).join("") + took + `</div>`;
   }).join("");
 
   box.scrollTop = box.scrollHeight;
@@ -475,7 +511,13 @@ async function send() {
 
   try {
     const res = await api.add(text);
-    session.messages.push({ role: "system", results: res.results || [] });
+    session.messages.push({
+      role: "system",
+      results: res.results || [],
+      // One or two LLM calls happen behind this: extraction, then a decision
+      // per candidate. Showing the cost makes that concrete rather than magic.
+      ms: state.lastCallMs,
+    });
   } catch (err) {
     session.messages.push({ role: "error", text: err.message });
   } finally {
@@ -808,35 +850,57 @@ async function doDream() {
   showModal("Dream — synthesis", `<p>Queueing…</p>`);
   try {
     if (state.queueOk === false) {
-      // The most common setup failure by far: DREAM_QUEUE_PROVIDER=arq with no
-      // Redis running. Saying so beats a raw 502 from the retry timeout.
+      // Saying which queue is unreachable beats a raw 502 from the API.
       showModal("Dream — queue unavailable", `
         <div class="callout"><p>The job queue
         (<code>${esc(state.queueProvider || "unknown")}</code>) is not reachable, so synthesis
         cannot be scheduled.</p></div>
-        <p>If this is <code>arq</code>, it needs Redis. MemDream does not:
-        set <code>DREAM_QUEUE_PROVIDER=database</code> in <code>.env</code> and restart the API.
-        The <code>dream_jobs</code> collection becomes the queue and no broker is involved.</p>
-        <p>Use <code>inline</code> instead to run synthesis inside the API process — fine for
-        this console, not for production.</p>`);
+        <p>Set <code>DREAM_QUEUE_PROVIDER=inline</code> in <code>.env</code> and restart the
+        API. Synthesis then runs in a bounded pool of tasks inside the API: one process,
+        no broker, nothing else to deploy. That is the default.</p>
+        <p><code>database</code> is the alternative, for several API replicas sharing one
+        queue — it needs a worker process
+        (<code>python -m app.workers.synthesis_worker</code>).</p>`);
       return;
     }
 
-    let job = await api.synthesize();
+    // Wall clock from the moment the request leaves the browser. The job row
+    // reports its own `durationMs`, but that only covers synthesis itself —
+    // this is the number a user actually waits, queue time included.
+    const minMemories = parseInt($("minMemories").value, 10);
+    const override = Number.isFinite(minMemories) ? minMemories : null;
+
+    const t0 = performance.now();
+    let job = await api.synthesize(override);
+    const queuedMs = Math.round(performance.now() - t0);
+
+    let polls = 0;
     const deadline = Date.now() + 300000;
     while (!["completed", "failed", "skipped"].includes(job.status) && Date.now() < deadline) {
-      $("modalBody").innerHTML = `<p>Job <code>${esc(job.jobId)}</code> — ${esc(job.status)}…</p>
+      const waited = ((performance.now() - t0) / 1000).toFixed(1);
+      $("modalBody").innerHTML = `
+        <p>Job <code>${esc(job.jobId)}</code> — ${esc(job.status)}…
+        <span style="color:var(--supersede)">${waited}s elapsed</span></p>
         <p style="color:var(--dim)">Reading across every memory, clustering, then writing patterns.
-        Runs off the request path, so this is a poll rather than a wait.</p>`;
+        Runs off the request path, so this is a poll rather than a wait —
+        ${polls} poll${polls === 1 ? "" : "s"} so far, one every 2s.</p>`;
       await new Promise((r) => setTimeout(r, 2000));
+      polls += 1;
       job = await api.job(job.jobId);
     }
+    const totalMs = Math.round(performance.now() - t0);
     await refreshAll();
     const patterns = state.memories.filter((m) => m.memoryType === "pattern");
 
     showModal("Dream — synthesis", `
-      <p><code>POST /v1/dream/synthesize</code> → a row in <code>dream_jobs</code> → claimed by
-      a worker.${state.queueProvider ? ` Queue: <code>${esc(state.queueProvider)}</code>.` : ""}</p>
+      <p><code>POST /v1/dream/synthesize</code> returns immediately with a job id; the work
+      happens off the request path.${state.queueProvider === "inline"
+        ? " Queue: <code>inline</code> — a bounded pool of tasks inside the API, so there is no"
+          + " second process and no broker."
+        : state.queueProvider
+          ? ` Queue: <code>${esc(state.queueProvider)}</code> — a row in <code>dream_jobs</code>`
+            + " claimed by a worker process."
+          : ""}</p>
       <h3>Result</h3>
       <table>
         <tr><th>status</th><td>${esc(job.status)}</td></tr>
@@ -845,16 +909,31 @@ async function doDream() {
         <tr><th>patterns created</th><td>${job.patternsCreated}</td></tr>
         <tr><th>patterns updated</th><td>${job.patternsUpdated}</td></tr>
         <tr><th>patterns skipped</th><td>${job.patternsSkipped}</td></tr>
-        <tr><th>duration</th><td>${job.durationMs ? Math.round(job.durationMs) + " ms" : "—"}</td></tr>
       </table>
+      <h3>Timing</h3>
+      <table>
+        <tr><th>enqueue call</th><td>${queuedMs} ms<span style="color:var(--dim)">
+          — how long <code>POST /synthesize</code> itself took, before any work started</span></td></tr>
+        <tr><th>synthesis</th><td>${job.durationMs ? Math.round(job.durationMs) + " ms" : "—"}
+          <span style="color:var(--dim)">— server-side, from the job row</span></td></tr>
+        <tr><th>you waited</th><td><b>${(totalMs / 1000).toFixed(1)} s</b>
+          <span style="color:var(--dim)">— wall clock, including ${polls} status
+          poll${polls === 1 ? "" : "s"} at 2s each</span></td></tr>
+      </table>
+      ${polls > 0 ? `<p style="color:var(--dim)">Most of the gap between "synthesis" and "you
+      waited" is this console's 2-second poll interval, not the server. Your own client would
+      poll faster, or not at all — synthesis normally runs unattended.</p>` : ""}
       ${job.error ? `<div class="callout"><p>${esc(job.error)}</p></div>` : ""}
       ${!job.error && !job.memoriesAnalyzed ? `<div class="callout">
-        <p>Nothing was analysed. Synthesis needs at least
-        <b>${esc(String(state.minMemories ?? 20))}</b> active memories for this user before it
-        will look for patterns — below that, any "pattern" it found would be a coincidence
-        dressed up as an insight.</p>
-        <p style="color:var(--dim)">Add more messages for this session, or lower
-        <code>DREAM_DREAM__SYNTHESIS__MIN_MEMORIES</code>.</p></div>` : ""}
+        <p>Nothing was analysed. Synthesis needs a minimum number of active memories for this
+        user before it will look for patterns — below that, any "pattern" it finds is a
+        coincidence dressed up as an insight.</p>
+        <p style="color:var(--dim)">Lower the <b>min</b> box next to Run Dream to try it on a
+        smaller account, or set <code>DREAM_DREAM__SYNTHESIS__MIN_MEMORIES</code> to change the
+        default for everyone.</p></div>` : ""}
+      ${override ? `<p style="color:var(--dim)">Ran with <b>min ${override}</b> instead of the
+      configured default — this request only. Two or three memories make a restatement, not a
+      generalisation, so keep the real threshold high.</p>` : ""}
       ${patterns.length ? `<h3>Patterns</h3>` + patterns.map((p) =>
         `<div class="card PATTERN" style="margin-bottom:8px"><div class="content">${esc(p.content)}</div>
          <div class="ids">derived from ${p.sourceMemoryIds?.length || 0} memories</div></div>`).join("") : ""}

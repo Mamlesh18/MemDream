@@ -43,15 +43,15 @@ Two processes, four stores, one write path.
                     │ dream_operations│ └────────────────┘
                     │ dream_jobs     │
                     └────────┬───────┘
-                             │ job id via Redis
+                             │ background task
                      ┌───────▼──────────────────────────┐
-                     │        Worker (arq)              │
+                     │     Synthesis pool (in-process)  │
                      │  select → cluster → synthesise   │
                      └──────────────────────────────────┘
 ```
 
 MongoDB is authoritative and holds every embedding. FAISS is a derived index that
-can be deleted and rebuilt (`scripts/rebuild_index.py`). Redis carries only job
+can be deleted and rebuilt (`scripts/rebuild_index.py`). The queue carries only job
 ids — job *state* lives in Mongo, so status is answerable whatever the broker is.
 
 ---
@@ -428,9 +428,9 @@ reworded. The next synthesis run decides.
 ```
 POST /v1/dream/synthesize
   → job row in Mongo (status=queued)
-  → job id into Redis
+  → job row, then a background task
   → API returns immediately
-                          ARQ worker picks it up
+                          the synthesis pool picks it up
                           → run_synthesis_task (workers/synthesis_worker.py)
                           → SynthesisEngine.run  (synthesis.py:90)
 ```
@@ -566,7 +566,7 @@ implementation rather than a dependency.
 | `LLMProvider` | `generate_json` | Azure OpenAI, offline fake |
 | `EmbeddingProvider` | `embed`, `embed_batch` | Azure OpenAI, offline fake |
 | `VectorStore` | `upsert`, `search`, `delete`, `update`, `count`, `clear` | FAISS, in-memory |
-| `JobQueue` | `enqueue_synthesis`, `health_check`, `close` | ARQ, inline |
+| `JobQueue` | `enqueue_synthesis`, `health_check`, `close` | in-process pool, jobs table |
 
 Everything is constructed in one place — `app/container.py`, the composition
 root. The API and the worker build the *same* container, so there's no second

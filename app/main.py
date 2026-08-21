@@ -57,9 +57,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     container = await DreamContainer.create(settings)
     app.state.container = container
 
+    # A process killed mid-synthesis leaves its job row at `running`, and a row
+    # that looks in-flight blocks that user's next trigger until the stale
+    # timeout expires. Clearing them on boot turns a fifteen-minute dead zone
+    # after a crash into nothing.
+    try:
+        reaped = await container.jobs.reap_stale(
+            stale_after_seconds=settings.dream.synthesis.job_stale_after_seconds
+        )
+        if reaped:
+            logger.warning("stale_jobs_reaped", count=reaped)
+    except Exception as exc:  # noqa: BLE001 - housekeeping must not stop startup
+        logger.warning("stale_job_reap_failed", error=str(exc)[:200])
+
     try:
         yield
     finally:
+        # Closes the container, which drains in-flight synthesis first.
         logger.info("dream_memory_stopping")
         await container.close()
 

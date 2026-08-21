@@ -68,7 +68,7 @@ class QdrantVectorStore(VectorStore):
         """Create the collection and tenancy indexes once, lazily.
 
         Lazy rather than at construction so the process still boots when Qdrant
-        is briefly unavailable — the same reasoning as the Redis pool.
+        is briefly unavailable, rather than failing the request that found it down.
         """
         if self._ready:
             return

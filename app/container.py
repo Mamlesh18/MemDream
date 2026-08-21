@@ -6,7 +6,8 @@ free of any import from a concrete provider, and makes the whole framework
 testable by passing fakes to `DreamContainer.create`.
 
 Both entry points build the same container: the FastAPI app on startup, and the
-ARQ worker on boot. There is no second wiring path that could drift.
+optional worker process on boot. There is no second wiring path that could
+drift.
 """
 
 from __future__ import annotations
@@ -174,15 +175,18 @@ class DreamContainer:
             dream_service=dream_service,
         )
 
-        # The inline queue runs jobs through the service that owns it, so the
+        # The embedded queue runs jobs through the service that owns it, so the
         # wiring can only be completed once both exist.
-        from app.providers.queue.inline_queue import InlineJobQueue
+        from app.providers.queue.inline_queue import EmbeddedJobQueue
 
-        if isinstance(queue, InlineJobQueue):
-            async def _runner(job_id: str, client_id: str, bot_id: str, user_id: str) -> None:
+        if isinstance(queue, EmbeddedJobQueue):
+            async def _runner(job_id: str) -> None:
                 await container.dream_service.run_job(job_id)
 
-            queue.set_runner(_runner)
+            # The repository comes too, so a job rejected by backpressure or
+            # abandoned at shutdown can be failed with a reason rather than
+            # left looking in-flight until the stale reaper notices.
+            queue.bind(_runner, jobs)
 
         logger.info(
             "container_ready",
@@ -219,6 +223,11 @@ class DreamContainer:
 
         try:
             checks["queue"] = {"ok": await self.queue.health_check(), "provider": self.queue.name}
+            depth = getattr(self.queue, "depth", None)
+            if depth is not None:
+                # Waiting + running. A queue that is saturated is working hard
+                # rather than broken, so it shows up here rather than as `ok: false`.
+                checks["queue"]["depth"] = depth
         except Exception as exc:  # noqa: BLE001
             checks["queue"] = {"ok": False, "error": str(exc)[:200]}
 
@@ -234,7 +243,13 @@ class DreamContainer:
         return checks
 
     async def close(self) -> None:
-        """Release every held resource, continuing past individual failures."""
+        """Release every held resource, continuing past individual failures.
+
+        **Order matters.** The queue goes first because closing it drains
+        in-flight synthesis, and a draining job still needs the database and the
+        LLM client. Closing the database first would fail every job that was
+        about to finish.
+        """
         for name, closer in (
             ("queue", self.queue.close),
             ("vectors", self.vectors.close),

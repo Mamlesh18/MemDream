@@ -251,3 +251,61 @@ async def test_a_job_is_not_readable_from_a_neighbouring_namespace(container):
     assert (await container.dream_service.get_job(job.job_id, prod)).job_id == job.job_id
     with pytest.raises(JobNotFoundError):
         await container.dream_service.get_job(job.job_id, staging)
+
+
+# --------------------------------------------------------------------------- #
+# Per-run minimum override
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_minimum_can_be_lowered_for_one_run(container, scope, store_memory):
+    """So synthesis can be demonstrated on a small account without permanently
+    lowering the bar for everyone."""
+    container.settings.dream.synthesis.min_memories = 20
+    for index in range(3):
+        await store_memory(f"User does activity {index} regularly.")
+
+    refused = await container.dream_service.request_synthesis(
+        scope, wait=True, force=True, requested_by="test"
+    )
+    assert refused.status == JobStatus.SKIPPED
+    assert "20 required" in refused.error
+
+    allowed = await container.dream_service.request_synthesis(
+        scope, wait=True, force=True, min_memories=2, requested_by="test"
+    )
+    assert allowed.status != JobStatus.SKIPPED
+
+
+async def test_the_override_reports_the_number_it_actually_used(
+    container, scope, store_memory
+):
+    """"20 required" is confusing when you asked for 5."""
+    container.settings.dream.synthesis.min_memories = 20
+    await store_memory("User cycles to work.")
+
+    job = await container.dream_service.request_synthesis(
+        scope, wait=True, force=True, min_memories=5, requested_by="test"
+    )
+
+    assert job.status == JobStatus.SKIPPED
+    assert "5 required" in job.error
+    assert "20 required" not in job.error
+
+
+async def test_the_override_rides_on_the_job_row(container, scope):
+    """It has to: with the database queue, the process that runs the job is not
+    the one that created it, so a function argument would not survive the hop."""
+    job = await container.dream_service.request_synthesis(
+        scope, min_memories=3, requested_by="test"
+    )
+
+    stored = await container.jobs.get(job.job_id)
+    assert stored.metadata["minMemories"] == 3
+
+
+async def test_omitting_the_override_uses_the_configured_default(container, scope):
+    job = await container.dream_service.request_synthesis(scope, requested_by="test")
+
+    stored = await container.jobs.get(job.job_id)
+    assert stored.metadata["minMemories"] is None

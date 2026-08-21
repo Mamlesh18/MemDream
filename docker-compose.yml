@@ -6,18 +6,21 @@
 #   API   http://localhost:8000/docs
 #   Mongo mongodb://localhost:27017
 #
-# There is no separate vector-store container: FAISS is an in-process library,
-# not a server. The index lives on the `faiss-index` volume, mounted into both
-# the API and the worker, which coordinate writes with an inter-process file
-# lock. That is also why the API is not scaled beyond one replica here — see
-# docs/architecture.md for what to change before you do.
+# **Two containers, and one of them is the database.** Synthesis runs inside the
+# API in a bounded pool of tasks, so there is no worker container and no broker.
+#
+# There is no vector-store container either: FAISS is an in-process library, not
+# a server. Its index lives on the `faiss-index` volume. That is also why the API
+# is not scaled beyond one replica here — two processes writing one FAISS
+# directory need the inter-process file lock, and past that you want a vector
+# store that is actually a service. See docs/architecture.md.
 
-name: dream-memory
+name: memdream
 
 services:
   api:
     build: .
-    container_name: dream-api
+    container_name: memdream-api
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -25,43 +28,19 @@ services:
       - .env
     environment:
       DREAM_MONGODB_URI: mongodb://mongo:27017
-      DREAM_REDIS_URL: redis://redis:6379/0
       DREAM_FAISS_PATH: /data/faiss
-      DREAM_QUEUE_PROVIDER: arq
+      # Synthesis runs here, in this process. Nothing else to deploy.
+      DREAM_QUEUE_PROVIDER: inline
       DREAM_CONFIG_FILE: /app/config/dream.yaml
     volumes:
       - faiss-index:/data/faiss
     depends_on:
       mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  worker:
-    build: .
-    container_name: dream-worker
-    restart: unless-stopped
-    command: ["arq", "app.workers.synthesis_worker.WorkerSettings"]
-    env_file:
-      - .env
-    environment:
-      DREAM_MONGODB_URI: mongodb://mongo:27017
-      DREAM_REDIS_URL: redis://redis:6379/0
-      DREAM_FAISS_PATH: /data/faiss
-      DREAM_CONFIG_FILE: /app/config/dream.yaml
-      # Enable to run the nightly sweep across every user.
-      DREAM_DREAM__SYNTHESIS__SCHEDULE_ENABLED: "false"
-    volumes:
-      - faiss-index:/data/faiss
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
         condition: service_healthy
 
   mongo:
     image: mongo:7
-    container_name: dream-mongo
+    container_name: memdream-mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -74,22 +53,22 @@ services:
       retries: 10
       start_period: 20s
 
-  redis:
-    image: redis:7-alpine
-    container_name: dream-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+  # Running several API replicas that should share one synthesis queue? Set
+  # DREAM_QUEUE_PROVIDER=database on the api service and add:
+  #
+  #   worker:
+  #     build: .
+  #     command: ["python", "-m", "app.workers.synthesis_worker"]
+  #     env_file: [.env]
+  #     environment:
+  #       DREAM_MONGODB_URI: mongodb://mongo:27017
+  #       DREAM_QUEUE_PROVIDER: database
+  #       DREAM_FAISS_PATH: /data/faiss
+  #     volumes: [faiss-index:/data/faiss]
+  #     depends_on: {mongo: {condition: service_healthy}}
+  #
+  # Still no broker — the jobs collection is the queue.
 
 volumes:
   mongo-data:
-  redis-data:
   faiss-index:

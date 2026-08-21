@@ -51,6 +51,10 @@ class SynthesisCandidates:
     memories: list[Memory]
     existing_patterns: list[Memory]
     total_active: int
+    #: The floor actually applied, which may be a per-run override rather than
+    #: the configured default. Carried so the job can report *which* number it
+    #: fell short of — "20 required" is confusing when you asked for 5.
+    required: int = 0
 
     @property
     def has_enough(self) -> bool:
@@ -81,22 +85,33 @@ class CandidateSelector:
         )
 
     async def select(
-        self, scope: MemoryScope, *, include_stale_patterns: bool = True
+        self,
+        scope: MemoryScope,
+        *,
+        include_stale_patterns: bool = True,
+        min_memories: int | None = None,
     ) -> SynthesisCandidates:
-        """Gather the evidence pool and the patterns already built from it."""
+        """Gather the evidence pool and the patterns already built from it.
+
+        ``min_memories`` overrides the configured floor for this run only —
+        enough to demonstrate synthesis on a small account without permanently
+        lowering the bar for everyone.
+        """
+        required = self._settings.min_memories if min_memories is None else min_memories
         total_active = await self._repository.count(
             scope,
             statuses=[MemoryStatus.ACTIVE],
             exclude_types=[MemoryType.PATTERN.value],
         )
 
-        if total_active < self._settings.min_memories:
+        if total_active < required:
             logger.info(
                 "synthesis_below_minimum",
                 active=total_active,
-                required=self._settings.min_memories,
+                required=required,
+                overridden=min_memories is not None,
             )
-            return SynthesisCandidates([], [], total_active)
+            return SynthesisCandidates([], [], total_active, required=required)
 
         # Pull a generous window, then rank. Ordering by updatedAt first means a
         # very old but very important memory can drop out — acceptable, because

@@ -34,7 +34,7 @@ To run against real infrastructure:
 
 ```bash
 cp .env.example .env            # fill in AZURE_OPENAI_*
-docker compose up               # MongoDB + Redis + API + worker
+docker compose up               # MongoDB + API. That is the whole stack
 
 DREAM_TEST_MONGODB_URI=mongodb://localhost:27017 pytest   # against real Mongo
 python -m eval.run --provider azure                       # against a real model

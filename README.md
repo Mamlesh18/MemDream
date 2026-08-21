@@ -148,8 +148,9 @@ pip install -r requirements-dev.txt      # or: pip install -e ".[dev]"
 pytest
 ```
 
-MemDream needs **MongoDB**. Redis and a second worker process are only needed for
-background synthesis — see [one service or two](#one-service-or-two).
+MemDream needs **one database** and nothing else — MongoDB or PostgreSQL. No
+broker, no worker process; synthesis runs inside the API. See
+[one service](#one-service).
 
 ### Option 3 — Zero infrastructure
 
@@ -388,56 +389,95 @@ DREAM_MEMORY__ALLOW_SENSITIVE=true
 
 ---
 
-## One service or two?
-
-**The queue is not on the user's path.** Remember, recall, supersede and merge
-all run synchronously inside the API. The queue exists only for background
-synthesis.
+## One service
 
 ```bash
-DREAM_QUEUE_PROVIDER=database   # default. No broker at all
-DREAM_QUEUE_PROVIDER=inline     # one process, synthesis runs in the API
-DREAM_QUEUE_PROVIDER=arq        # Redis-backed, lower claim latency
+uvicorn app.main:app          # that is the whole deployment
 ```
 
-| | `inline` | `database` | `arq` |
-|---|---|---|---|
-| Infrastructure | the canonical store | the canonical store | **+ Redis** |
-| Add / search / supersede | identical | identical | identical |
-| Synthesis runs | in the API process | on a worker | on a worker |
-| Survives a restart mid-synthesis | no | yes | yes |
-| Scheduled nightly sweep | no | yes | yes |
-| Claim latency | none | one poll interval | milliseconds |
+**Nothing on the user's path goes through a queue.** Remember, recall, supersede
+and merge all run synchronously inside the API. Background synthesis is the only
+thing that does not, and it does not need a broker or a second process.
 
-**`database` is the default, and most deployments should stay on it.** The
-`dream_jobs` table *is* the queue: enqueueing is an insert, and claiming is a
-single atomic compare-and-swap — `find_one_and_update` on MongoDB,
-`FOR UPDATE SKIP LOCKED` on Postgres. Two workers polling at the same instant
-cannot claim the same job either way.
-
-That works because synthesis has two properties a payment webhook does not.
-It is **idempotent** — running it twice over the same evidence produces one
-pattern, not two. And its trigger is **derivable from durable state** — "this
-user has N new memories since their last synthesis" is a fact sitting in the
-database, not an event you can miss. So a lost job costs nothing: the condition
-that caused it is still true, and it is re-created on the next write. Delivery
-guarantees are for the other case.
-
-Reach for `arq` only when claim latency of one poll interval is genuinely too
-slow. For work measured in seconds and scheduled in hours, it buys nothing and
-adds a service to every deployment.
+Synthesis makes one LLM call per cluster and takes seconds, so the write that
+triggers it cannot wait for it. That is the only hard requirement — **the work
+must be detached from the request that caused it** — and detached does not have
+to mean "another process". By default it is a bounded pool of asyncio tasks in
+the API process.
 
 ```bash
-# two-service mode, no broker
-uvicorn app.main:app --reload
-python -m app.workers.synthesis_worker
+DREAM_QUEUE_PROVIDER=inline     # default. One process, no broker
+DREAM_QUEUE_PROVIDER=database   # jobs table is the queue, claimed by a worker
 ```
 
-If `POST /v1/dream/synthesize` returns `502` with a Redis connection error, this
-setting is why — `arq` is selected and there is no Redis. `GET /ready` reports
-it as `degraded` (still `200`, since reads and writes are unaffected).
+| | `inline` | `database` |
+|---|---|---|
+| Processes to deploy | **1** | 2 |
+| Extra services | **none** | none |
+| Add / search / supersede | identical | identical |
+| Survives a restart mid-job | re-fires on next write | yes |
+| Shared across API replicas | no | yes |
 
----
+There is no Redis option, and that is deliberate: `database` gives the same
+guarantees for the same two processes without a broker to run, so a Redis-backed
+queue would buy nothing but claim latency measured in milliseconds — for work
+measured in seconds and scheduled in hours.
+
+### Why in-process is safe here
+
+Most background work would be reckless to run this way. Synthesis has two
+properties that make it the exception, and both have to hold:
+
+**It is idempotent.** Running it twice over the same evidence produces one
+pattern, not two — the synthesiser checks source overlap and semantic similarity
+before writing anything.
+
+**Its trigger is derived from durable state.** "This user has N new memories
+since their last completed run" is a fact in the database, not an event you can
+miss. A job lost to a restart costs nothing: the condition is still true, and
+the next write re-creates it.
+
+So losing a job is not losing work. That is the opposite of a payment webhook —
+which is what delivery guarantees are actually for.
+
+It is also LLM-bound: almost its whole duration is spent awaiting the network,
+which on an event loop costs essentially nothing. The only real CPU is
+clustering a few hundred vectors.
+
+The pool is bounded rather than one task per job, because fifty calls to
+`POST /v1/dream/synthesize` would otherwise open fifty concurrent LLM streams
+and turn a traffic spike into a rate-limit incident. Past the queue limit a job
+is failed immediately with a reason rather than parked — a row sitting at
+`queued` reads as in-flight and would block that user's next trigger for the
+whole stale timeout. Shutdown drains in-flight work before stopping.
+
+```yaml
+dream:
+  synthesis:
+    max_concurrent: 2      # jobs this process runs at once
+    max_queued: 100        # waiting, before backpressure
+    drain_seconds: 30      # how long shutdown waits
+```
+
+`GET /ready` reports the queue's depth (waiting + running), so saturation is
+visible before it becomes a problem.
+
+### When to move off it
+
+Two reasons, both about running more than one API process: several replicas that
+should share one synthesis queue, or a job that genuinely must survive the
+process that queued it restarting. Then `database` — the same idea with the jobs
+table as the queue, and a worker claiming rows with an atomic compare-and-swap
+(`find_one_and_update` on MongoDB, `FOR UPDATE SKIP LOCKED` on Postgres). Two
+workers polling at the same instant cannot claim the same job.
+
+```bash
+uvicorn app.main:app                        # terminal 1, or N replicas
+python -m app.workers.synthesis_worker      # terminal 2
+```
+
+Still no broker.
+
 
 ## Providers
 
@@ -446,8 +486,8 @@ it as `degraded` (still `200`, since reads and writes are unaffected).
 | LLM | Azure OpenAI · OpenAI · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint · **Gemini** · **Anthropic** · offline fake | `app/providers/llm/base.py` |
 | Embeddings | Azure OpenAI · OpenAI · Ollama · any OpenAI-compatible endpoint · **Gemini** · offline fake | `app/providers/embeddings/base.py` |
 | Vector store | FAISS · in-memory · Qdrant · pgvector · Chroma · Pinecone · Milvus · Azure AI Search | `app/providers/vector_store/base.py` |
-| Queue | **MongoDB (default, no broker)** · ARQ + Redis · inline | `app/providers/queue/base.py` |
-| Canonical store | MongoDB | `app/repositories/` |
+| Queue | **in-process pool (default)** · the canonical store's jobs table | `app/providers/queue/base.py` |
+| Canonical store | MongoDB · PostgreSQL | `app/repositories/` |
 
 Switching provider is configuration, not code:
 

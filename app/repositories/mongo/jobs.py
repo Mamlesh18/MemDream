@@ -2,7 +2,8 @@
 
 The job row is the single source of truth for a synthesis run's status. The
 queue only carries a job id; everything a caller polls for lives here, so the
-API can answer ``GET /v1/dream/jobs/{id}`` without talking to Redis.
+API can answer ``GET /v1/dream/jobs/{id}`` without talking to whatever is
+running the job.
 """
 
 from __future__ import annotations

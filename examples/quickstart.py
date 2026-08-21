@@ -4,7 +4,7 @@
 
 Runs the whole framework in-process -- fake providers, in-memory vector store,
 mongomock -- and walks through every behaviour the system exists to provide.
-No MongoDB, no Redis, no Azure credentials, no network, no cost.
+No MongoDB, no Azure credentials, no network, no cost.
 
 To run the same script against a real deployment, set:
 

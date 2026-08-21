@@ -36,7 +36,7 @@ python examples/quickstart.py
 ```
 
 Runs the entire framework in-process with the offline providers: no MongoDB, no
-Redis, no Azure credentials, no network, no cost. Walks through every behaviour
+no Azure credentials, no network, no cost. Walks through every behaviour
 the system exists to provide — add, exact-duplicate NOOP, supersede,
 non-destructive history, current-vs-historical retrieval, synthesis,
 idempotency, tenant isolation, and the audit trail.

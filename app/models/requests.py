@@ -251,6 +251,14 @@ class SynthesizeRequest(_ScopedRequest):
     #: Re-evaluate every cluster even if an equivalent pattern already exists.
     #: Idempotency still applies — this only widens candidate selection.
     force: bool = False
+    #: Override how many active memories this user needs before synthesis will
+    #: look for patterns, for this run only. Omit to use the configured default.
+    #:
+    #: The floor is deliberately not 1. A "pattern" drawn from one or two
+    #: memories is a restatement, not a generalisation, and the whole point of
+    #: the threshold is that coincidence looks like insight at small n. Lower it
+    #: to see the machinery work on a small account; do not ship it that way.
+    min_memories: int | None = Field(default=None, ge=2, le=1000)
 
 
 class SynthesizeResponse(_APIModel):
