@@ -9,19 +9,39 @@ at `/openapi.json`.
 
 **Everything is camelCase**, in both directions.
 
-**Every memory endpoint is scoped.** Requests carry `clientId`, `botId`, and one
-of `phoneNumber` or `userId`. This includes reads by id: a memory id is a random
-handle, not an authorisation token, so possessing one is not enough to read the
-record. A memory belonging to another tenant reports `404`, not `403` —
+**Every memory endpoint is scoped.** This includes reads by id: a memory id is a
+random handle, not an authorisation token, so possessing one is not enough to
+read the record. A memory belonging to another tenant reports `404`, not `403` —
 indistinguishable from not existing.
+
+**Only the user is required.** Identity arrives as `userId`, or as `phoneNumber`
+for MemDream to derive one from. Everything else is an optional partition
+dimension:
+
+| Field | | |
+|---|---|---|
+| `userId` \| `phoneNumber` | **required** | the isolation boundary |
+| `agentId` | optional | which agent or bot, when a deployment has several |
+| `clientId` | optional | the tenant, for platforms serving several customers |
+| `namespace` | optional | further dimensions: environment, region, workspace |
+| `botId` | optional | previous name for `agentId`, still accepted |
+
+A single-agent app sends `userId` and nothing else. Adding a dimension later
+creates a *new* partition rather than widening the old one, so introduce them
+before you have data, not after.
 
 `POST` bodies carry scope as fields; `GET` endpoints take them as query
 parameters.
 
-**Authentication** is enabled by setting `DREAM_API_KEYS` to a comma-separated
-list. Send the key as `X-API-Key`. Empty means no authentication — appropriate
-when the service sits behind a gateway on a private network, which is why it is
-opt-in rather than mandatory.
+**Authentication.** `DREAM_API_KEYS` (comma-separated) turns it on; send the key
+as `X-API-Key`. Empty means no authentication — appropriate behind a gateway on
+a private network, which is why it is opt-in rather than mandatory.
+
+For multi-tenant deployments use `DREAM_API_KEY_CLIENTS=key1:acme,key2:globex`
+instead. A **bound** key carries its tenant, so `clientId` comes from the
+credential rather than the request body, and a body naming a different client is
+refused with `401` rather than silently overridden. Without this, any valid key
+could name any `clientId` and read another customer's memories.
 
 **Request ids.** Send `X-Request-ID` to correlate with your own logs, or read
 the one the service generates back from the response header.
@@ -172,6 +192,148 @@ top-k cosine. `scoreBreakdown` is there so a ranking can be explained rather
 than guessed at; weights are configurable under `retrieval.weights`.
 
 Embeddings are never returned.
+
+---
+
+## The manual endpoints
+
+`POST /v1/memories` is the conversational path: it decides *what* is worth
+remembering. The four endpoints below are the deliberate path — importing known
+facts, correcting a bad extraction, honouring "forget that", answering an
+erasure request. They skip extraction and Dream reasoning entirely, because you
+have already said exactly what you want.
+
+All four still write an audit row. A human editing memory by hand is more worth
+recording than a routine automated decision, not less.
+
+---
+
+## POST /v1/memories/manual
+
+Write a memory verbatim. Returns `201`.
+
+```json
+{
+  "content": "User is allergic to peanuts.",
+  "memoryType": "constraint",
+  "importance": 0.9,
+  "userId": "user_123"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `content` | string | required, ≤ 4000 chars |
+| `memoryType` | string | default `other`. Open vocabulary |
+| `importance` | 0–1 | default `0.6` |
+| `confidence` | 0–1 | default `1.0` — you asserted it, so nothing was inferred |
+| `explicit` | bool | default `true`. `false` marks it as inferred rather than stated |
+| `temporalNature` | string | default `current`. `permanent` protects it from supersede |
+| `validFrom` `validUntil` | ISO-8601 | when the fact is true. `validFrom` defaults to now |
+| `metadata` | object | stored on the memory |
+| `allowDuplicate` | bool | default `false` |
+
+Write content **in the third person** (`"User is allergic to peanuts."`),
+matching what the extractor produces, so retrieval treats it the same way.
+
+An identical active memory is returned as-is rather than duplicated, so a
+re-run importer converges instead of multiplying. `allowDuplicate: true` forces
+a second row.
+
+Everything written here carries `metadata.source: "manual"`, so it stays
+distinguishable from anything the engine decided.
+
+**Response** — the same shape as `GET /v1/memories/{memoryId}`.
+
+---
+
+## PATCH /v1/memories/{memoryId}
+
+Correct an active memory in place. Only the fields you send change.
+
+```json
+{
+  "content": "User is allergic to peanuts and shellfish.",
+  "importance": 0.95,
+  "userId": "user_123"
+}
+```
+
+Accepts any subset of `content`, `memoryType`, `importance`, `confidence`,
+`explicit`, `temporalNature`, `validFrom`, `validUntil`, `metadata`. Sending
+none of them is `422` — an update that changes nothing is a mistake worth
+reporting rather than a no-op worth accepting.
+
+The memory **keeps its id**, so anything referencing it stays valid. Changing
+`content` re-embeds it in the same call, because an index that disagrees with
+the text it points at is worse than a stale one.
+
+`metadata` is **merged**, not replaced: send only the keys you want to change.
+Every edit stamps `metadata.lastManualEdit`, so a hand-corrected memory is
+identifiable long after the audit row has scrolled away.
+
+An unrecognised `temporalNature` is ignored rather than rejected, so a typo
+leaves the rest of the update applied.
+
+Editing is deliberately *not* a supersede. An operator fixing a bad extraction
+is correcting a record; a supersede chain would claim the user's situation
+changed, which would put a falsehood into the history. If the world changed
+rather than the record being wrong, `POST /v1/memories` and let Dream supersede
+it properly.
+
+Only `active` memories can be edited — superseded and merged rows are history,
+and history is not rewritten (`409`).
+
+**Response** — the same shape as `GET /v1/memories/{memoryId}`.
+
+---
+
+## DELETE /v1/memories/{memoryId}
+
+Query: scope, plus `permanent` (default `false`).
+
+Two verbs behind one URL, because "stop using this" and "destroy this" carry
+very different risk, and merging them is how data gets lost by accident.
+
+| | |
+|---|---|
+| `permanent=false` *(default)* | the memory moves to `expired` and leaves the search index. It stops influencing answers but stays readable and auditable. **This is what "forget that" should do.** |
+| `permanent=true` | the row and every edge touching it are erased. Irreversible. Reserve it for data that must not exist — a wrongly captured secret, or an erasure request |
+
+```json
+{ "memoryId": "mem_a1b2c3", "result": "expired", "permanent": false }
+```
+
+`result` is `expired` or `deleted`. A memory outside the requesting scope is
+`404`, indistinguishable from one that does not exist.
+
+---
+
+## DELETE /v1/memories
+
+Erase **everything** for one user: memories, relationships, audit trail and
+jobs. Requires `?confirm=ERASE`.
+
+```
+DELETE /v1/memories?userId=user_123&confirm=ERASE
+```
+
+```json
+{
+  "deletedMemories": 42,
+  "deletedRelations": 15,
+  "deletedOperations": 88,
+  "deletedJobs": 3
+}
+```
+
+This is the right-to-erasure path, so the audit trail goes too: retaining "we
+decided to store X about this user" after deleting X would defeat the point of
+the request. Nothing is recorded about the purge itself, for the same reason.
+
+The `confirm=ERASE` guard exists because a destructive collection-level
+operation should not be reachable by getting a URL slightly wrong. Without it
+the request is `422`.
 
 ---
 
@@ -363,9 +525,29 @@ The action tallies are the first place to look when tuning thresholds: all
 
 | | |
 |---|---|
-| `GET /health` | liveness. Does not touch dependencies, so an orchestrator will not restart the service because Mongo blipped |
-| `GET /ready` | readiness. `503` if MongoDB or the vector store is down; the body still names which |
+| `GET /health` | liveness. Does not touch dependencies, so an orchestrator will not restart the service because the database blipped |
+| `GET /ready` | readiness. `503` if the canonical store or the vector store is down; the body still names which |
 | `GET /v1/metrics` | counters and latency histograms as JSON |
+| `GET /v1/metrics/tokens` | token usage split by operation, with an estimated cost |
+
+`/ready` reports every dependency, not just the failing one:
+
+```json
+{
+  "status": "degraded",
+  "version": "0.1.0",
+  "checks": {
+    "database": { "ok": false, "provider": "mongodb", "error": "connection refused" },
+    "vector_store": { "ok": true, "provider": "faiss" },
+    "queue": { "ok": true, "provider": "database" },
+    "embeddings": { "provider": "azure_openai", "model": "azure:text-embedding-3-small", "dimensions": 1536 },
+    "llm": { "provider": "azure_openai", "model": "azure:gpt-4o-mini" }
+  }
+}
+```
+
+`embeddings` and `llm` are reported but are not hard dependencies: a provider
+outage should not take the service out of rotation while reads still work.
 
 `/v1/metrics` is deliberately not the Prometheus text format — with
 `DREAM_OTEL_ENABLED=true` the same instruments export over OTLP, which is the
@@ -377,6 +559,65 @@ Counters include `memories_added`, `memories_merged`, `memories_superseded`,
 Histograms include `llm_latency_ms`, `embedding_latency_ms`,
 `vector_search_latency_ms`, `retrieval_latency_ms`, `dream_latency_ms`,
 `synthesis_duration_ms`.
+
+`/v1/metrics/tokens` splits spend by operation, which is what tells you *where*
+the tokens went rather than only how many there were:
+
+```json
+{
+  "byOperation": [
+    {
+      "operation": "decide",
+      "llmCalls": 3,
+      "embeddingCalls": 0,
+      "inputTokens": 88400,
+      "outputTokens": 5900,
+      "embeddingTokens": 900,
+      "totalTokens": 95200,
+      "estimatedCost": 0.016818
+    },
+    {
+      "operation": "extract",
+      "llmCalls": 3,
+      "embeddingCalls": 0,
+      "inputTokens": 41200,
+      "outputTokens": 3100,
+      "embeddingTokens": 0,
+      "totalTokens": 44300,
+      "estimatedCost": 0.00804
+    }
+  ],
+  "totals": {
+    "inputTokens": 129600,
+    "outputTokens": 9000,
+    "embeddingTokens": 900,
+    "llmCalls": 6,
+    "embeddingCalls": 0,
+    "totalTokens": 139500,
+    "estimatedCost": 0.024858
+  },
+  "pricing": {
+    "currency": "USD",
+    "llmInputPer1M": 0.15,
+    "llmOutputPer1M": 0.6,
+    "embeddingPer1M": 0.02,
+    "note": "Estimates from configured rates, not billed amounts. ..."
+  }
+}
+```
+
+Input and output are reported separately because they are priced separately, and
+`operation` is what makes "what does one `add` actually cost?" answerable at all.
+
+Cost is **an estimate derived from the configured rates, never a billed
+amount** — rates change, vary by region and commitment, and your deployment may
+not use these models. Set `pricing.*` in `config/dream.yaml` to match your own
+contract, or to `0` to switch cost reporting off.
+
+These counters are **process-wide and in memory**: they reset on restart, and a
+second replica keeps its own. For per-user accounting that survives restarts and
+is correct across replicas, use `GET /v1/dream/stats`, which sums the token
+usage recorded on each audit row.
 
 ---
 

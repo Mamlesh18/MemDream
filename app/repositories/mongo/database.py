@@ -31,6 +31,69 @@ JOBS = "dream_jobs"
 _SCOPE_KEYS = [("scopeKey", ASCENDING)]
 
 
+def _normalise_key(key: Any) -> list[tuple[str, Any]]:
+    """Index keys, in a shape the two sides can be compared in.
+
+    `IndexModel.document["key"]` is a SON; `index_information()` returns a list
+    of tuples. Order matters and must be preserved — a compound index on
+    (a, b) is not the index on (b, a).
+    """
+    items = key.items() if hasattr(key, "items") else key
+    return [(field, direction) for field, direction in items]
+
+
+async def _sync_indexes(collection: AsyncIOMotorCollection, models: list[IndexModel]) -> None:
+    """Create indexes, replacing any of *ours* whose definition has changed.
+
+    MongoDB refuses to create an index whose name is taken by one with a
+    different key (`IndexKeySpecsConflict`, code 86), and it is right to: two
+    indexes cannot share a name. But that turns a schema change into a startup
+    crash on every database that already has data — which is exactly what
+    happened when scoped queries moved from a `(clientId, botId, userId)`
+    predicate to the single `scopeKey` digest. An index named `scope_status`
+    already existed, over different fields, and the service would not boot.
+
+    So a stale index is dropped and rebuilt. That is safe here for a specific
+    reason: **only indexes MemDream itself declares by name are touched.** An
+    index we no longer match cannot serve any query we issue — it is pure write
+    amplification — and anything an operator added under a different name is
+    left alone entirely.
+
+    The drop is logged at WARNING, because rebuilding an index on a large
+    collection is not free and an operator should see it happen rather than
+    discover it in a latency graph.
+    """
+    try:
+        existing = await collection.index_information()
+    except Exception as exc:  # noqa: BLE001 - a fresh database has no indexes yet
+        logger.debug("index_information_unavailable", error=str(exc)[:200])
+        existing = {}
+
+    for model in models:
+        document = model.document
+        name = document["name"]
+        current = existing.get(name)
+        if current is None:
+            continue
+
+        same_key = _normalise_key(current.get("key", [])) == _normalise_key(document["key"])
+        same_unique = bool(current.get("unique", False)) == bool(document.get("unique", False))
+        if same_key and same_unique:
+            continue
+
+        logger.warning(
+            "stale_index_replaced",
+            collection=collection.name,
+            index=name,
+            was=_normalise_key(current.get("key", [])),
+            now=_normalise_key(document["key"]),
+            detail="index definition changed; dropping and rebuilding",
+        )
+        await collection.drop_index(name)
+
+    await collection.create_indexes(models)
+
+
 class MongoDatabase(Database):
     """Owns the Motor client and exposes the four collections."""
 
@@ -80,8 +143,18 @@ class MongoDatabase(Database):
     # --- schema ------------------------------------------------------------- #
 
     async def ensure_schema(self) -> None:
-        """Create indexes. Idempotent — safe to run on every boot."""
-        await self.memories.create_indexes(
+        """Create indexes. Idempotent — safe to run on every boot.
+
+        Indexes whose definition has changed since a previous version are
+        replaced rather than allowed to fail the boot; see `_sync_indexes`.
+
+        Note that this reconciles the *schema*, not the *data*. A database
+        written before `scopeKey` existed also needs its rows backfilling, or
+        every scoped query will match nothing —
+        `python -m scripts.migrate_scope_key` does that.
+        """
+        await _sync_indexes(
+            self.memories,
             [
                 # The workhorse: scope + status drives retrieval pre-filtering.
                 IndexModel([*_SCOPE_KEYS, ("status", ASCENDING)], name="scope_status"),
@@ -102,7 +175,8 @@ class MongoDatabase(Database):
                 IndexModel([("sourceMemoryIds", ASCENDING)], name="source_memory_ids"),
             ]
         )
-        await self.relations.create_indexes(
+        await _sync_indexes(
+            self.relations,
             [
                 IndexModel(
                     [*_SCOPE_KEYS, ("fromMemoryId", ASCENDING), ("relationType", ASCENDING)],
@@ -125,7 +199,8 @@ class MongoDatabase(Database):
                 ),
             ]
         )
-        await self.operations.create_indexes(
+        await _sync_indexes(
+            self.operations,
             [
                 IndexModel([*_SCOPE_KEYS, ("timestamp", DESCENDING)], name="scope_timestamp"),
                 IndexModel([("memoryId", ASCENDING)], name="memory_id"),
@@ -133,7 +208,8 @@ class MongoDatabase(Database):
                 IndexModel([("requestId", ASCENDING)], name="request_id"),
             ]
         )
-        await self.jobs.create_indexes(
+        await _sync_indexes(
+            self.jobs,
             [
                 IndexModel([*_SCOPE_KEYS, ("createdAt", DESCENDING)], name="scope_created"),
                 IndexModel([("status", ASCENDING), ("createdAt", DESCENDING)], name="status_created"),

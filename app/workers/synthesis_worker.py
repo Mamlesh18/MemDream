@@ -1,16 +1,25 @@
 """The background synthesis worker.
 
-Run with:
+Two ways to run it, matching the two queue providers:
 
-    arq app.workers.synthesis_worker.WorkerSettings
+    python -m app.workers.synthesis_worker            # DREAM_QUEUE_PROVIDER=database
+    arq app.workers.synthesis_worker.WorkerSettings   # DREAM_QUEUE_PROVIDER=arq
 
-Builds the same `DreamContainer` the API does, so worker and API share one
+Both build the same `DreamContainer` the API does, so worker and API share one
 wiring path and one set of provider implementations.
+
+The first needs no broker: the `dream_jobs` table is the queue, and this process
+polls it, claiming one row at a time with an atomic compare-and-swap. **Something
+has to run it.** With `database` selected and no worker, `POST /v1/dream/synthesize`
+writes a job row that nobody ever picks up, and the caller polls a job stuck at
+`queued` — quieter than a connection error and more confusing. Use
+`DREAM_QUEUE_PROVIDER=inline` if you would rather not run a second process at
+all; synthesis then happens inside the API request.
 
 Two ways work arrives:
 
-* **On demand** — `POST /v1/dream/synthesize` enqueues `run_synthesis_task`.
-* **Scheduled** — an optional cron job walks every user with memories and
+* **On demand** — `POST /v1/dream/synthesize` enqueues a job.
+* **Scheduled** — an optional sweep walks every user with memories and
   synthesises each in turn.
 """
 
@@ -180,3 +189,90 @@ class WorkerSettings:
     max_tries = 2
 
     redis_settings = _redis_settings()
+
+
+# --------------------------------------------------------------------------- #
+# Broker-free worker
+# --------------------------------------------------------------------------- #
+
+
+async def run_forever() -> None:
+    """Poll the canonical store for queued jobs and run them.
+
+    The counterpart to `DatabaseJobQueue`: that class writes and claims, this
+    one is the process doing the claiming. Everything about *how* a job is
+    claimed lives in the repository, so this stays a loop and a handler.
+
+    Stops cleanly on SIGINT/SIGTERM: a job already in flight is allowed to
+    finish, because abandoning it would leave a row at `running` for the stale
+    timeout before anything could retry it.
+    """
+    import asyncio
+    import contextlib
+    import signal
+
+    from app.providers.queue.database_queue import DatabaseJobQueue
+
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_json)
+    if settings.otel_enabled:
+        metrics.enable_otel(settings.service_name)
+
+    container = await DreamContainer.create(settings)
+    queue = container.queue
+
+    if not isinstance(queue, DatabaseJobQueue):
+        # Refuse rather than start a loop that will never see a job. Silently
+        # idling here is how you end up debugging the API.
+        await container.close()
+        raise SystemExit(
+            f"This worker polls the canonical store, but DREAM_QUEUE_PROVIDER is "
+            f"{settings.queue_provider!r}.\n"
+            "  database  -> python -m app.workers.synthesis_worker  (this)\n"
+            "  arq       -> arq app.workers.synthesis_worker.WorkerSettings\n"
+            "  inline    -> no worker needed; synthesis runs in the API process"
+        )
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for signal_name in ("SIGINT", "SIGTERM"):
+        signal_number = getattr(signal, signal_name, None)
+        if signal_number is None:
+            continue
+        with contextlib.suppress(NotImplementedError):  # Windows lacks add_signal_handler
+            loop.add_signal_handler(signal_number, stop.set)
+
+    async def handle(job) -> None:
+        with operation_context():
+            logger.info("synthesis_task_started", job_id=job.job_id, user_id=job.user_id)
+            # No scope argument: the job row is the authority on its own
+            # partition, and a worker holding only a job id has nothing
+            # better to offer.
+            await container.dream_service.run_job(job.job_id)
+
+    # A worker that died mid-job leaves its row at `running` forever. Clearing
+    # those on startup is housekeeping, not correctness — `find_active_for_scope`
+    # already ignores them — but it means an operator sees `failed` with a
+    # reason rather than rows stuck in flight.
+    reaped = await container.jobs.reap_stale(
+        stale_after_seconds=settings.dream.synthesis.job_stale_after_seconds
+    )
+    if reaped:
+        logger.warning("stale_jobs_reaped", count=reaped)
+
+    logger.info("synthesis_worker_ready", queue=queue.name, poll=True)
+    try:
+        await queue.poll_forever(handle, stop=stop)
+    finally:
+        await container.close()
+        logger.info("synthesis_worker_stopped")
+
+
+def main() -> None:
+    import asyncio
+
+    asyncio.run(run_forever())
+
+
+if __name__ == "__main__":
+    main()

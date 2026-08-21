@@ -53,7 +53,9 @@ class DatabaseJobQueue(JobQueue):
 
     @property
     def name(self) -> str:
-        return "mongo"
+        # Not "mongo": this queue holds a JobRepository, so it is whichever
+        # canonical store is configured. Reported in /ready and the console.
+        return "database"
 
     async def enqueue_synthesis(self, job: DreamJob) -> str:
         """No-op beyond logging: the job row *is* the queue entry.
@@ -61,7 +63,7 @@ class DatabaseJobQueue(JobQueue):
         `DreamService` has already written the row with `status=queued` by the
         time this is called, so there is nothing to publish.
         """
-        logger.info("synthesis_job_enqueued", job_id=job.job_id, queue="mongo")
+        logger.info("synthesis_job_enqueued", job_id=job.job_id, queue="database")
         return job.job_id
 
     async def claim_next(self) -> DreamJob | None:

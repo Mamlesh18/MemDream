@@ -47,8 +47,56 @@ async def test_health_is_liveness_only(client):
 async def test_ready_reports_each_dependency(client):
     response = await client.get("/ready")
     assert response.status_code == 200
-    checks = response.json()["checks"]
-    assert set(checks) >= {"database", "vector_store", "queue", "embeddings", "llm"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert set(body["checks"]) >= {"database", "vector_store", "queue", "embeddings", "llm"}
+
+
+async def test_a_dead_queue_is_degraded_but_still_serving(client, container, monkeypatch):
+    """The state that was missing, and the one that actually happens.
+
+    `DREAM_QUEUE_PROVIDER=arq` with no Redis kills synthesis and nothing else.
+    Reporting that as `ok` sends you looking at the wrong thing when
+    `POST /v1/dream/synthesize` starts returning 502; reporting it as 503 would
+    pull a service out of rotation that can still read and write perfectly well.
+    """
+
+    async def dead(*_args, **_kwargs):
+        raise RuntimeError("Cannot connect to Redis at redis://localhost:6379/0")
+
+    monkeypatch.setattr(container.queue, "health_check", dead)
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 200, "a broken queue must not withhold traffic"
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["queue"]["ok"] is False
+    # Names the cause, so the answer does not require reading logs.
+    assert "Redis" in body["checks"]["queue"]["error"]
+
+
+async def test_a_dead_database_withholds_traffic(client, container, monkeypatch):
+    """The other half of the distinction: reads are failing, so 503."""
+
+    async def dead(*_args, **_kwargs):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(container.database, "ping", dead)
+
+    response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+
+
+async def test_descriptive_checks_do_not_count_as_failures(client):
+    """`embeddings` and `llm` report a model name, not an `ok` flag. Treating a
+    missing `ok` as False would make every deployment permanently degraded."""
+    body = (await client.get("/ready")).json()
+
+    assert "ok" not in body["checks"]["embeddings"]
+    assert body["status"] == "ok"
 
 
 async def test_metrics_snapshot_is_served(client):

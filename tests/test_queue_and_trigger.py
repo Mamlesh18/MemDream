@@ -208,3 +208,46 @@ async def test_counting_new_memories_excludes_patterns(container, scope, store_m
     await store_memory("A synthesised pattern.", memory_type=MemoryType.PATTERN.value)
 
     assert await container.memories.count_since(scope, None) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Rebuilding a scope from a job row
+# --------------------------------------------------------------------------- #
+
+
+async def test_a_job_rebuilds_its_full_scope_not_just_the_triple(container):
+    """A worker holds only a job id, so `run_job` reconstructs the partition
+    from the row. Reconstructing it from client/agent/user alone drops
+    `namespace`, and the resulting scopeKey matches none of this user's
+    memories — synthesis then analyses nothing, silently, for every deployment
+    that partitions by namespace.
+    """
+    from app.models.scope import MemoryScope
+
+    scope = MemoryScope(user_id="alice", agent_id="support", namespace={"env": "prod"})
+    job = await container.dream_service.request_synthesis(scope, requested_by="test")
+
+    stored = await container.jobs.get(job.job_id)
+    rebuilt = MemoryScope(
+        user_id=stored.user_id,
+        agent_id=stored.agent_id,
+        client_id=stored.client_id,
+        namespace=stored.namespace,
+    )
+
+    assert rebuilt.scope_key == scope.scope_key
+
+
+async def test_a_job_is_not_readable_from_a_neighbouring_namespace(container):
+    """The triple comparison would let these two see each other's jobs."""
+    from app.core.exceptions import JobNotFoundError
+    from app.models.scope import MemoryScope
+
+    prod = MemoryScope(user_id="alice", namespace={"env": "prod"})
+    staging = MemoryScope(user_id="alice", namespace={"env": "staging"})
+
+    job = await container.dream_service.request_synthesis(prod, requested_by="test")
+
+    assert (await container.dream_service.get_job(job.job_id, prod)).job_id == job.job_id
+    with pytest.raises(JobNotFoundError):
+        await container.dream_service.get_job(job.job_id, staging)

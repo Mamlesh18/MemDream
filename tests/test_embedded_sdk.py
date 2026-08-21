@@ -21,11 +21,13 @@ import inspect
 import pytest
 
 from memdream import AsyncMemDream, MemDream
-from memdream.client import _MemoryAPI, DreamClient, _DreamAPI
+from memdream.client import DreamClient, _DreamAPI, _MemoryAPI
 from memdream.exceptions import DreamNotFoundError
 from memdream.models import AddResult, MemoryRecord, SearchResult
 
-pytestmark = pytest.mark.asyncio
+# No module-level asyncio marker: `asyncio_mode = "auto"` picks up the async
+# tests, and the sync-facade tests below are deliberately plain `def` — there
+# is no event loop in them at all, which is the thing being tested.
 
 
 @pytest.fixture
@@ -53,7 +55,10 @@ async def test_remembering_and_recalling_without_a_server(mem):
     assert result.remembered
     assert result.action == "ADD"
 
-    found = await mem.search("where do they live?")
+    # The offline embedding provider scores on lexical overlap, so the query
+    # shares words with the memory. Paraphrase recall is a property of the real
+    # model, and asserting it here would test the fake rather than the facade.
+    found = await mem.search("Bangalore")
     assert isinstance(found, SearchResult)
     assert any("Bangalore" in memory.content for memory in found)
 
@@ -76,7 +81,7 @@ async def test_search_renders_straight_into_a_prompt(mem):
     """`as_context()` is the thing every integration would otherwise rewrite."""
     await mem.add("I am allergic to peanuts.")
 
-    context = (await mem.search("dietary restrictions")).as_context()
+    context = (await mem.search("allergic to peanuts")).as_context()
 
     assert context.startswith("- ")
     assert "peanut" in context.lower()
@@ -226,10 +231,33 @@ async def test_an_adopted_container_is_not_closed_by_the_facade(container):
 
     await facade.close()
 
-    # Still usable by whoever built it.
-    assert await container.memories.count(
-        (await AsyncMemDream(user_id="alice", container=container)._scope({}))
-    ) >= 0
+    # Still usable by whoever built it: a second facade over the same container
+    # reads what the first one wrote, which a closed connection could not do.
+    survivor = AsyncMemDream(user_id="alice", container=container)
+    assert any("tea" in memory.content for memory in await survivor.list())
+
+
+async def test_a_database_can_be_supplied_without_a_whole_container(settings, database):
+    """The middle ground between "configure everything" and "hand me a
+    container": bring your own connection, let the facade wire the rest.
+
+    Without it, anything wanting a throwaway schema — a test, an example, an app
+    that already owns its pool — has to build a container by hand and the
+    three-line integration stops being three lines.
+    """
+    facade = AsyncMemDream(
+        user_id="alice",
+        settings=settings,
+        database=database,
+        vector_provider="memory",
+    )
+    try:
+        result = await facade.add("I moved to Bangalore.")
+        assert result.remembered
+        # Landed in the connection we passed, not one the facade opened.
+        assert await database.memories.count_documents({}) >= 1
+    finally:
+        await facade.close()
 
 
 async def test_the_container_is_reachable_as_an_escape_hatch(mem):
@@ -268,7 +296,7 @@ def test_the_sync_facade_needs_no_asyncio_from_the_caller(container):
         result = mem.add("I moved to Bangalore.")
         assert result.remembered
 
-        found = mem.search("where do they live?")
+        found = mem.search("Bangalore")
         assert any("Bangalore" in memory.content for memory in found)
     finally:
         mem.close()

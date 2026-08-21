@@ -1,5 +1,34 @@
 # Examples
 
+## `embedded.py` — MemDream with no server
+
+```bash
+python examples/embedded.py
+```
+
+The shortest possible integration: three lines, no uvicorn, no worker, no API
+keys, no cost.
+
+```python
+from memdream import MemDream
+
+mem = MemDream(user_id="alice")
+mem.add("I moved to Bangalore.")
+print(mem.search("Where does the user live?").as_context())
+```
+
+`MemDream` builds the same container the API builds, so contradiction handling,
+tenant isolation and synthesis behave exactly as they do behind HTTP. When you
+later put MemDream behind a server, swap the constructor for `DreamClient` and
+leave the rest of your code alone — the method names, arguments and return types
+are the same.
+
+Start here if you want memory working in the next five minutes.
+`quickstart.py` below goes deeper into *why* each decision comes out the way it
+does.
+
+---
+
 ## `quickstart.py` — no infrastructure
 
 ```bash
@@ -73,17 +102,35 @@ cannot name one.
 
 ## Notes for real deployments
 
-**Scope comes from your session, never from the model or the user.** The SDK
-lets you set it once on the client:
+**Scope comes from your session, never from the model or the user.** Both SDK
+forms let you set it once:
 
 ```python
 client = DreamClient(
     base_url="http://localhost:8000",
     client_id=session.client_id,
-    bot_id=session.bot_id,
+    agent_id=session.agent_id,
+    phone_number=session.phone_number,
+)
+
+mem = MemDream(
+    client_id=session.client_id,
+    agent_id=session.agent_id,
     phone_number=session.phone_number,
 )
 ```
+
+Only `user_id` or `phone_number` is required; `agent_id`, `client_id` and
+`namespace` are optional dimensions you add if your deployment has them.
+
+**Hosted, bind your API keys to a tenant.** `DREAM_API_KEY_CLIENTS=key:acme`
+makes `clientId` come from the credential rather than the request body, so a
+caller cannot name someone else's tenant. Without it, any valid key can.
+
+**Embedded, build one `MemDream` per process and keep it.** It holds a database
+pool, an embedding client and an LLM client. One per request works but pays
+connection setup every time, and will exhaust the database's connection limit
+under load.
 
 **Synthesis is a scheduled job, not something an agent calls.** Enable the
 worker's nightly sweep with `DREAM_DREAM__SYNTHESIS__SCHEDULE_ENABLED=true`, or

@@ -72,18 +72,19 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance only
 def _require_core() -> None:
     """Fail with an instruction rather than a bare ImportError.
 
-    The SDK is published so it can be installed *next to* an agent framework
-    without dragging the server in. Someone who pip-installed `memdream` for the
-    HTTP client and then reached for `MemDream` needs to be told that, not shown
-    a traceback about `app.container`.
+    `DreamClient` needs only `httpx`, so it is reasonable to vendor the client
+    module alone next to an agent framework. Anyone who does that and then
+    reaches for `MemDream` should be told what is missing, not shown a traceback
+    about `app.container` — a module they never heard of and did not import.
     """
     try:
         import app.container  # noqa: F401
     except ImportError as exc:  # pragma: no cover - depends on install shape
         raise ImportError(
-            "The embedded MemDream needs the full package, not just the client. "
-            "Install it with: pip install memdream[server]\n"
-            "To talk to a MemDream server instead, use DreamClient."
+            "The embedded MemDream runs the engine in your process, so it needs "
+            "the whole package: pip install memdream\n"
+            "To talk to a MemDream server over HTTP instead, use DreamClient, "
+            "which needs only httpx."
         ) from exc
 
 
@@ -110,19 +111,28 @@ class AsyncMemDream:
         bot_id: str | None = None,
         settings: Settings | None = None,
         container: DreamContainer | None = None,
+        database: Any = None,
         **overrides: Any,
     ) -> None:
         """Scope defaults are set once here and omitted from every call.
 
-        `settings` takes a fully-built `Settings`; `**overrides` is the shortcut
-        for one or two fields (`llm_provider="fake"`). `container` adopts an
-        already-built one — which is how a FastAPI app can hand its own
-        container to a piece of code that wants the SDK surface.
+        Configuration comes from the environment unless you say otherwise:
+
+            settings    a fully-built `Settings`
+            **overrides a shortcut for one or two fields (`llm_provider="fake"`)
+            database    an already-connected store, when you do not want the
+                        facade to open its own — a throwaway schema in a test,
+                        or a connection the surrounding app already owns
+            container   an already-built container, adopted whole. This is how a
+                        FastAPI app hands its own wiring to code that wants the
+                        SDK surface, and the facade will not close what it did
+                        not open
         """
         _require_core()
 
         self._settings = settings
         self._overrides = overrides
+        self._database = database
         self._container = container
         # Adopted containers belong to their owner; ours are ours to close.
         self._owns_container = container is None
@@ -167,7 +177,9 @@ class AsyncMemDream:
                 elif self._overrides:
                     settings = settings.model_copy(update=self._overrides)
 
-                self._container = await DreamContainer.create(settings)
+                self._container = await DreamContainer.create(
+                    settings, database=self._database
+                )
         return self._container
 
     async def close(self) -> None:
@@ -531,6 +543,33 @@ class AsyncMemDream:
         job = await container.dream_service.get_job(job_id, scope)
         return DreamJob.from_dict(job.public_dump())
 
+    async def wait_for(
+        self,
+        job_id: str,
+        *,
+        timeout: float = 300.0,
+        poll_interval: float = 2.0,
+        **scope_kwargs: Any,
+    ) -> DreamJob:
+        """Poll until the job finishes or ``timeout`` elapses.
+
+        Present for parity with `DreamClient`. Embedded you rarely need it:
+        `synthesize(wait=True)` runs the job in this process and returns it
+        finished, whereas over HTTP the work happens in a worker you can only
+        observe by polling.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            job = await self.get_job(job_id, **scope_kwargs)
+            if job.is_finished:
+                return job
+            if asyncio.get_running_loop().time() >= deadline:
+                raise TimeoutError(
+                    f"Dream job {job_id} did not finish within {timeout}s "
+                    f"(last status: {job.status})"
+                )
+            await asyncio.sleep(poll_interval)
+
     async def list_jobs(self, *, limit: int = 20, **scope_kwargs: Any) -> list[DreamJob]:
         container = await self.start()
         scope = await self._scope(scope_kwargs)
@@ -629,6 +668,7 @@ class MemDream:
         "audit",
         "synthesize",
         "get_job",
+        "wait_for",
         "list_jobs",
         "stats",
         "health",

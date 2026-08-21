@@ -56,7 +56,8 @@
   .status { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
   .dot.ok  { background: var(--add);    box-shadow: 0 0 7px var(--add); }
-  .dot.bad { background: var(--danger); box-shadow: 0 0 7px var(--danger); }
+  .dot.bad  { background: var(--danger);    box-shadow: 0 0 7px var(--danger); }
+  .dot.warn { background: var(--supersede); box-shadow: 0 0 7px var(--supersede); }
 
   .main { flex: 1 1 auto; display: flex; min-height: 0; }
   .sidebar { flex: 0 0 208px; background: var(--panel); border-right: 1px solid var(--border);
@@ -300,6 +301,10 @@ const state = {
   memories: [],
   audit: [],
   logs: [],
+  // Filled in by ping(); undefined until the first /ready comes back, so
+  // "not yet known" stays distinguishable from "known to be down".
+  queueOk: undefined,
+  queueProvider: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -802,12 +807,27 @@ async function doSearch() {
 async function doDream() {
   showModal("Dream — synthesis", `<p>Queueing…</p>`);
   try {
+    if (state.queueOk === false) {
+      // The most common setup failure by far: DREAM_QUEUE_PROVIDER=arq with no
+      // Redis running. Saying so beats a raw 502 from the retry timeout.
+      showModal("Dream — queue unavailable", `
+        <div class="callout"><p>The job queue
+        (<code>${esc(state.queueProvider || "unknown")}</code>) is not reachable, so synthesis
+        cannot be scheduled.</p></div>
+        <p>If this is <code>arq</code>, it needs Redis. MemDream does not:
+        set <code>DREAM_QUEUE_PROVIDER=database</code> in <code>.env</code> and restart the API.
+        The <code>dream_jobs</code> collection becomes the queue and no broker is involved.</p>
+        <p>Use <code>inline</code> instead to run synthesis inside the API process — fine for
+        this console, not for production.</p>`);
+      return;
+    }
+
     let job = await api.synthesize();
     const deadline = Date.now() + 300000;
     while (!["completed", "failed", "skipped"].includes(job.status) && Date.now() < deadline) {
       $("modalBody").innerHTML = `<p>Job <code>${esc(job.jobId)}</code> — ${esc(job.status)}…</p>
         <p style="color:var(--dim)">Reading across every memory, clustering, then writing patterns.
-        Runs on the background worker.</p>`;
+        Runs off the request path, so this is a poll rather than a wait.</p>`;
       await new Promise((r) => setTimeout(r, 2000));
       job = await api.job(job.jobId);
     }
@@ -815,7 +835,8 @@ async function doDream() {
     const patterns = state.memories.filter((m) => m.memoryType === "pattern");
 
     showModal("Dream — synthesis", `
-      <p><code>POST /v1/dream/synthesize</code> → queued to Redis → picked up by the ARQ worker.</p>
+      <p><code>POST /v1/dream/synthesize</code> → a row in <code>dream_jobs</code> → claimed by
+      a worker.${state.queueProvider ? ` Queue: <code>${esc(state.queueProvider)}</code>.` : ""}</p>
       <h3>Result</h3>
       <table>
         <tr><th>status</th><td>${esc(job.status)}</td></tr>
@@ -827,6 +848,13 @@ async function doDream() {
         <tr><th>duration</th><td>${job.durationMs ? Math.round(job.durationMs) + " ms" : "—"}</td></tr>
       </table>
       ${job.error ? `<div class="callout"><p>${esc(job.error)}</p></div>` : ""}
+      ${!job.error && !job.memoriesAnalyzed ? `<div class="callout">
+        <p>Nothing was analysed. Synthesis needs at least
+        <b>${esc(String(state.minMemories ?? 20))}</b> active memories for this user before it
+        will look for patterns — below that, any "pattern" it found would be a coincidence
+        dressed up as an insight.</p>
+        <p style="color:var(--dim)">Add more messages for this session, or lower
+        <code>DREAM_DREAM__SYNTHESIS__MIN_MEMORIES</code>.</p></div>` : ""}
       ${patterns.length ? `<h3>Patterns</h3>` + patterns.map((p) =>
         `<div class="card PATTERN" style="margin-bottom:8px"><div class="content">${esc(p.content)}</div>
          <div class="ids">derived from ${p.sourceMemoryIds?.length || 0} memories</div></div>`).join("") : ""}
@@ -1033,16 +1061,19 @@ state transition        the backend does this, never the model
 vector index + audit log</div>
 
 <h3>Sessions</h3>
-<p>Each phone number is a separate user with completely isolated memory. Same <code>clientId</code>
-+ <code>botId</code> + phone = same memory. Change the phone number and you get a different person;
-change the <code>clientId</code> and you get a different tenant — the same phone number then
-resolves to two unrelated identities, and neither can see the other.</p>
+<p>Each phone number is a separate user with completely isolated memory. Change the phone number
+and you get a different person; change the <code>client</code> and you get a different tenant —
+the same phone number then resolves to two unrelated identities, and neither can see the other.</p>
+<p>Only the user is actually required. <code>client</code> and <code>bot</code> are optional
+dimensions that partition further, and this console fills them in so the tenancy behaviour is
+visible. A single-agent app would send neither. Note that every dimension is part of the partition
+key, so <em>adding</em> one later creates a new partition rather than widening the old one.</p>
 <p>The session list lives in your browser. The memories live in MongoDB.</p>
 
 <h3>Dream (synthesis)</h3>
 <p><b>Run Dream</b> reads across all of a user's memories, clusters them, and writes down patterns
 no single memory states — each with references back to its evidence. Needs at least 20 memories for
-that user. It runs on the background worker, not the API, because it takes seconds. Running it
+that user. It runs off the request path because it takes seconds. Running it
 repeatedly will not create duplicates.</p>
 
 <h3>What each operation costs</h3>
@@ -1080,7 +1111,9 @@ reported separately because they are priced separately.</p>
   <tr><td><code>GET /v1/dream/stats</code></td><td>Stats</td></tr>
   <tr><td><code>GET /v1/metrics</code></td><td>Metrics</td></tr>
   <tr><td><code>GET /v1/metrics/tokens</code></td><td>Tokens &amp; cost</td></tr>
-  <tr><td><code>GET /ready</code></td><td>Status light, top right</td></tr>
+  <tr><td><code>GET /ready</code></td><td>Status light, top right. Amber names a dependency
+  that is down without stopping reads and writes — a dead queue breaks Run Dream and nothing
+  else. Red means the database or vector store is gone</td></tr>
 </table>
 <p>The <b>API calls</b> strip at the bottom logs every request — click a row to see the exact JSON
 sent and received.</p>
@@ -1116,12 +1149,36 @@ function renderLog() {
 async function ping() {
   try {
     const ready = await api.ready();
-    const ok = ready.status === "ok";
-    $("dot").className = "dot " + (ok ? "ok" : "bad");
-    $("statusText").textContent = ok ? (ready.checks?.llm?.model || "connected") : "degraded";
+    const checks = ready.checks || {};
+
+    // Name the failing dependency rather than just saying "degraded". A dead
+    // queue and a dead database look identical otherwise, and they are not:
+    // one breaks Run Dream, the other breaks everything.
+    const down = Object.entries(checks)
+      .filter(([, c]) => c && c.ok === false)
+      .map(([name]) => name);
+
+    state.queueOk = checks.queue?.ok !== false;
+    state.queueProvider = checks.queue?.provider || "";
+
+    if (!down.length) {
+      $("dot").className = "dot ok";
+      $("statusText").textContent = checks.llm?.model || "connected";
+      $("statusText").title = "";
+      return;
+    }
+
+    // 503 means a hard dependency is gone and reads are failing too.
+    const hard = down.some((n) => n === "database" || n === "vector_store");
+    $("dot").className = "dot " + (hard ? "bad" : "warn");
+    $("statusText").textContent = down.join(", ") + " down";
+    $("statusText").title = down
+      .map((n) => `${n}: ${checks[n].error || "not responding"}`)
+      .join("\n");
   } catch {
     $("dot").className = "dot bad";
     $("statusText").textContent = "offline — start the API";
+    $("statusText").title = "";
   }
 }
 

@@ -146,18 +146,25 @@ class DreamService:
         if job is None:
             raise JobNotFoundError(f"Dream job {job_id} not found")
 
-        if scope is not None and not (
-            job.client_id == scope.client_id
-            and job.bot_id == scope.bot_id
-            and job.user_id == scope.user_id
-        ):
-            raise TenantIsolationError("Dream job does not belong to the requesting scope")
-
         # Rebuild the scope from the job row rather than trusting the caller's:
         # a worker picking this up has only a job id.
+        #
+        # **Every** dimension, `namespace` included. Rebuilding from the triple
+        # alone would compute a scopeKey matching none of this user's memories,
+        # and synthesis would quietly analyse nothing for any deployment that
+        # partitions by namespace.
         job_scope = MemoryScope(
-            client_id=job.client_id, bot_id=job.bot_id, user_id=job.user_id
+            user_id=job.user_id,
+            agent_id=job.agent_id,
+            client_id=job.client_id,
+            namespace=job.namespace,
         )
+
+        # Compared as partition identity, for the same reason: two scopes are
+        # the same partition when every dimension matches, and `scope_key` is
+        # the one value that says so.
+        if scope is not None and job_scope.scope_key != scope.scope_key:
+            raise TenantIsolationError("Dream job does not belong to the requesting scope")
 
         await self._jobs.mark_running(job.job_id)
         job.status = JobStatus.RUNNING
@@ -190,11 +197,10 @@ class DreamService:
         if job is None:
             raise JobNotFoundError(f"Dream job {job_id} not found")
 
-        if not (
-            job.client_id == scope.client_id
-            and job.bot_id == scope.bot_id
-            and job.user_id == scope.user_id
-        ):
+        # Partition identity, not a field-by-field comparison: the triple omits
+        # `namespace`, so two different partitions could compare equal and one
+        # tenant would read the other's job.
+        if job.scope_key != scope.scope_key:
             # Deliberately indistinguishable from "does not exist".
             raise JobNotFoundError(f"Dream job {job_id} not found")
 

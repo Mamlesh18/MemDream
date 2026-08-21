@@ -201,6 +201,25 @@ The fastest way to understand what the system is doing.
 
 ## Use it in your project
 
+Two ways in, one surface. **Embedded** runs MemDream inside your process — no
+server, no worker, nothing to deploy:
+
+```python
+from memdream import MemDream
+
+mem = MemDream(user_id="alice")          # scope set once
+
+mem.add("I moved to Bangalore.")
+print(mem.search("Where does the user live?").as_context())
+# - User lives in Bangalore.
+```
+
+That is the whole integration. It builds the same `DreamContainer` the API
+builds, so contradiction handling, tenant isolation and synthesis behave exactly
+as they do behind HTTP.
+
+**Hosted** talks to a running MemDream instead — one process holding the
+database connections, several agents sharing it:
 
 ```python
 from memdream import DreamClient
@@ -227,17 +246,36 @@ job = client.dream.synthesize()
 job = client.dream.wait_for(job.job_id)
 ```
 
-`AsyncDreamClient` has the same surface with awaitable methods.
+The two have **the same method names, arguments and return types**, so moving a
+prototype onto a deployed service changes the constructor line and nothing else.
+`AsyncMemDream` and `AsyncDreamClient` are the awaitable equivalents.
+
+|  | `MemDream` (embedded) | `DreamClient` (hosted) |
+|---|---|---|
+| Deploy | nothing | uvicorn, optionally a worker |
+| Connections | one pool per process using it | one pool, shared |
+| Best for | scripts, notebooks, a single agent, getting started | several services, several languages, central control |
+| Synthesis | `synthesize(wait=True)` runs it inline | a worker picks it up |
+| Needs | the whole package | `httpx` |
+
+A start-embedded, move-to-hosted path is the intended one, and it costs a line:
+
+```python
+mem = MemDream(user_id="alice")                                  # day one
+mem = DreamClient("https://memory.internal", user_id="alice")    # later
+```
 
 ### In an agent turn loop
 
 Three lines, and it works with any framework:
 
 ```python
-memories = client.memory.search(user_message, latest_only=True)   # recall
+memories = mem.search(user_message, latest_only=True)   # recall
 reply    = your_llm(system_prompt + memories.as_context(), user_message)
-client.memory.add(user_message)                                   # remember
+mem.add(user_message)                                   # remember
 ```
+
+`mem` here is either form — the loop does not care which.
 
 Two things worth copying: **recall before responding, remember after** (otherwise
 the current message becomes context for answering itself), and **do the write in
@@ -352,31 +390,52 @@ DREAM_MEMORY__ALLOW_SENSITIVE=true
 
 ## One service or two?
 
-**The queue is not on the user's path.** Remember, recall, supersede and merge all
-run synchronously inside the API. Redis and the worker exist only for background
+**The queue is not on the user's path.** Remember, recall, supersede and merge
+all run synchronously inside the API. The queue exists only for background
 synthesis.
 
 ```bash
-DREAM_QUEUE_PROVIDER=inline   # one process, no Redis
-DREAM_QUEUE_PROVIDER=arq      # API + worker, survives restarts
+DREAM_QUEUE_PROVIDER=database   # default. No broker at all
+DREAM_QUEUE_PROVIDER=inline     # one process, synthesis runs in the API
+DREAM_QUEUE_PROVIDER=arq        # Redis-backed, lower claim latency
 ```
 
-| | `inline` | `arq` |
-|---|---|---|
-| Infrastructure | MongoDB only | MongoDB + Redis |
-| Add / search / supersede | identical | identical |
-| Synthesis runs | in the API process | on the worker |
-| Survives a restart mid-synthesis | no | yes |
-| Scheduled nightly sweep | no | yes |
+| | `inline` | `database` | `arq` |
+|---|---|---|---|
+| Infrastructure | the canonical store | the canonical store | **+ Redis** |
+| Add / search / supersede | identical | identical | identical |
+| Synthesis runs | in the API process | on a worker | on a worker |
+| Survives a restart mid-synthesis | no | yes | yes |
+| Scheduled nightly sweep | no | yes | yes |
+| Claim latency | none | one poll interval | milliseconds |
 
-Start with `inline`. Move to `arq` when you enable scheduled synthesis or scale
-past one API replica.
+**`database` is the default, and most deployments should stay on it.** The
+`dream_jobs` table *is* the queue: enqueueing is an insert, and claiming is a
+single atomic compare-and-swap — `find_one_and_update` on MongoDB,
+`FOR UPDATE SKIP LOCKED` on Postgres. Two workers polling at the same instant
+cannot claim the same job either way.
+
+That works because synthesis has two properties a payment webhook does not.
+It is **idempotent** — running it twice over the same evidence produces one
+pattern, not two. And its trigger is **derivable from durable state** — "this
+user has N new memories since their last synthesis" is a fact sitting in the
+database, not an event you can miss. So a lost job costs nothing: the condition
+that caused it is still true, and it is re-created on the next write. Delivery
+guarantees are for the other case.
+
+Reach for `arq` only when claim latency of one poll interval is genuinely too
+slow. For work measured in seconds and scheduled in hours, it buys nothing and
+adds a service to every deployment.
 
 ```bash
-# two-service mode
+# two-service mode, no broker
 uvicorn app.main:app --reload
-arq app.workers.synthesis_worker.WorkerSettings
+python -m app.workers.synthesis_worker
 ```
+
+If `POST /v1/dream/synthesize` returns `502` with a Redis connection error, this
+setting is why — `arq` is selected and there is no Redis. `GET /ready` reports
+it as `degraded` (still `200`, since reads and writes are unaffected).
 
 ---
 

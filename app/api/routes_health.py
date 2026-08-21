@@ -23,25 +23,45 @@ async def health() -> HealthResponse:
 async def ready(container: ContainerDep, response: Response) -> HealthResponse:
     """Readiness — every dependency reporting in.
 
-    Returns 503 when a hard dependency is down, so traffic is withheld, but the
-    body still lists which one, so the answer does not require reading logs.
+    Three states, not two:
+
+        ok          everything answering
+        degraded    something is down that does not stop reads and writes.
+                    Still **200**: taking the service out of rotation would be a
+                    worse outage than the one being reported
+        degraded    a hard dependency is down. **503**, so traffic is withheld
+
+    The middle state is the one worth having. A broken queue means synthesis is
+    dead while everything else works, and reporting that as `ok` sends you
+    looking at the wrong thing when `POST /v1/dream/synthesize` starts
+    returning 502 — which is exactly what happens with `DREAM_QUEUE_PROVIDER=arq`
+    and no Redis running.
+
+    Either way the body lists every check, so the answer never requires reading
+    logs.
     """
     checks = await container.health()
 
-    # "database" rather than "mongodb": the canonical store is selectable,
-    # and a readiness probe keyed to one backend would report healthy on the
-    # other no matter what it was doing.
-    hard_dependencies = ("database", "vector_store")
-    degraded = [
-        name
-        for name in hard_dependencies
-        if not checks.get(name, {}).get("ok", False)
-    ]
-    if degraded:
+    def failing(names: tuple[str, ...]) -> list[str]:
+        # Only checks that actually report an `ok` field are judged. The
+        # `embeddings` and `llm` entries are descriptive, not probes.
+        return [
+            name
+            for name in names
+            if "ok" in checks.get(name, {}) and not checks[name]["ok"]
+        ]
+
+    # "database" rather than "mongodb": the canonical store is selectable, and a
+    # readiness probe keyed to one backend would report healthy on the other no
+    # matter what it was doing.
+    hard_down = failing(("database", "vector_store"))
+    soft_down = failing(("queue",))
+
+    if hard_down:
         response.status_code = 503
 
     return HealthResponse(
-        status="degraded" if degraded else "ok",
+        status="degraded" if (hard_down or soft_down) else "ok",
         version=__version__,
         checks=checks,
     )
