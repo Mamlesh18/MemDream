@@ -179,6 +179,24 @@ def _containment(inner: set[str], outer: set[str]) -> float:
     return len(inner & outer) / len(inner)
 
 
+def _view_id(item: dict[str, Any]) -> str:
+    """Id of an existing memory as the decision payload renders it.
+
+    `_memory_view` uses short keys — the payload is billed by the token and ten
+    candidates carry ten copies of every key name. The longer spellings are
+    still accepted because the *candidate* half of the payload uses them.
+    """
+    return str(item.get("id") or item.get("memoryId") or "")
+
+
+def _view_text(item: dict[str, Any]) -> str:
+    return str(item.get("text") or item.get("content") or "")
+
+
+def _view_type(item: dict[str, Any]) -> str | None:
+    return item.get("type") or item.get("memoryType")
+
+
 class FakeLLMProvider(LLMProvider):
     def __init__(self, model_name: str = "fake-llm") -> None:
         self._model_name = model_name
@@ -401,11 +419,11 @@ class FakeLLMProvider(LLMProvider):
             if not any(marker in candidate_text for marker in markers):
                 continue
             for item in existing:
-                if candidate_type and item.get("memoryType") != candidate_type:
+                if candidate_type and _view_type(item) != candidate_type:
                     continue
-                item_tokens = _tokens(str(item.get("content", "")))
+                item_tokens = _tokens(_view_text(item))
                 if item_tokens & set(attributes):
-                    memory_id = str(item.get("memoryId"))
+                    memory_id = _view_id(item)
                     if memory_id not in targets:
                         targets.append(memory_id)
         return targets
@@ -432,9 +450,9 @@ class FakeLLMProvider(LLMProvider):
 
             candidate_values = candidate_tokens - predicate_set
             for item in existing:
-                if candidate_type and item.get("memoryType") != candidate_type:
+                if candidate_type and _view_type(item) != candidate_type:
                     continue
-                item_tokens = _tokens(str(item.get("content", "")))
+                item_tokens = _tokens(_view_text(item))
                 if not (item_tokens & shared):
                     continue
 
@@ -460,7 +478,7 @@ class FakeLLMProvider(LLMProvider):
                 # because the two sides usually share their qualifiers
                 # ("production database") and differ only in the value itself.
                 if _jaccard(candidate_values, item_values) < 0.7:
-                    memory_id = str(item.get("memoryId"))
+                    memory_id = _view_id(item)
                     if memory_id not in targets:
                         targets.append(memory_id)
 
@@ -486,16 +504,16 @@ class FakeLLMProvider(LLMProvider):
 
         scored = [
             (
-                _jaccard(candidate_tokens, _tokens(str(item.get("content", "")))),
-                _containment(_tokens(str(item.get("content", ""))), candidate_tokens),
+                _jaccard(candidate_tokens, _tokens(_view_text(item))),
+                _containment(_tokens(_view_text(item)), candidate_tokens),
                 item,
             )
             for item in existing
         ]
         scored.sort(key=lambda row: row[0], reverse=True)
         overlap, containment, best = scored[0]
-        best_id = str(best.get("memoryId"))
-        best_content = str(best.get("content", ""))
+        best_id = _view_id(best)
+        best_content = _view_text(best)
 
         # Same fact, same words.
         if overlap >= 0.92:
@@ -521,9 +539,9 @@ class FakeLLMProvider(LLMProvider):
         ]
         if not supersede_targets and has_change_marker:
             supersede_targets = [
-                str(item.get("memoryId"))
+                _view_id(item)
                 for score, _, item in scored
-                if score >= 0.25 and item.get("memoryType") == candidate.get("memoryType")
+                if score >= 0.25 and _view_type(item) == candidate.get("memoryType")
             ]
 
         if supersede_targets:
@@ -541,13 +559,13 @@ class FakeLLMProvider(LLMProvider):
         enrichment = max(scored, key=lambda row: row[1])
         _, enrichment_containment, enrichment_item = enrichment
         if enrichment_containment >= 0.6 and len(candidate_tokens) > len(
-            _tokens(str(enrichment_item.get("content", "")))
+            _tokens(_view_text(enrichment_item))
         ):
             return {
                 "action": "MERGE",
                 "reason": "new memory is a richer version of an existing one",
                 "memory": {**base, "content": content},
-                "targetMemoryIds": [str(enrichment_item.get("memoryId"))],
+                "targetMemoryIds": [_view_id(enrichment_item)],
             }
 
         # Substantial overlap without new information. The bar sits at 0.45
@@ -575,7 +593,7 @@ class FakeLLMProvider(LLMProvider):
         if len(memories) < 3:
             return {"action": "NOOP", "reason": "not enough evidence for a pattern", "pattern": None}
 
-        source_ids = [str(item.get("memoryId")) for item in memories]
+        source_ids = [_view_id(item) for item in memories]
 
         # Idempotency: an existing pattern resting on mostly the same evidence
         # means this cluster has already been synthesised.
@@ -593,7 +611,7 @@ class FakeLLMProvider(LLMProvider):
 
         counts: Counter[str] = Counter()
         for item in memories:
-            counts.update(_tokens(str(item.get("content", ""))))
+            counts.update(_tokens(_view_text(item)))
 
         ranked = [word for word, _ in counts.most_common(10)]
         recurring = [word for word, count in counts.most_common(10) if count >= 2]

@@ -15,7 +15,7 @@ from datetime import datetime
 
 from app.core.config import SupersedeSettings
 from app.core.logging import get_logger
-from app.dream.prompts import SUPERSEDE_SYSTEM, build_decision_payload
+from app.dream.prompts import build_decision_payload, supersede_system
 from app.dream.validation import ValidatedDecision, validate_decision
 from app.memory.lifecycle import MemoryLifecycle
 from app.models.dream import DreamDecision
@@ -33,10 +33,15 @@ class SupersedeEngine:
         llm: LLMProvider,
         lifecycle: MemoryLifecycle,
         settings: SupersedeSettings | None = None,
+        domain: str = "",
     ) -> None:
         self._llm = llm
         self._lifecycle = lifecycle
         self._settings = settings or SupersedeSettings()
+        # Passed in rather than read from settings: this engine holds only its
+        # own section, and reaching for the root would couple it to the whole
+        # configuration to get one sentence.
+        self._domain = domain
 
     @property
     def enabled(self) -> bool:
@@ -82,7 +87,7 @@ class SupersedeEngine:
     ) -> tuple[ValidatedDecision, LLMResult[DreamDecision]]:
         """Ask the focused supersede question. Used in ``staged`` decision mode."""
         result = await self._llm.generate_json(
-            system=SUPERSEDE_SYSTEM,
+            system=supersede_system(self._domain),
             user=build_decision_payload(candidate, related, now=now, task="decide"),
             response_model=DreamDecision,
         )

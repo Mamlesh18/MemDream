@@ -153,12 +153,26 @@ def validate_response(payload: dict[str, Any], response_model: type[T]) -> T:
 
 
 def schema_hint(response_model: type[BaseModel]) -> str:
-    """A compact JSON Schema to paste into the system prompt.
+    """The output shape to paste into the system prompt.
 
-    Titles and descriptions are stripped — the prompt already explains the task
-    in prose, and repeating it inside the schema wastes tokens and invites the
-    model to echo documentation back as field values.
+    A model may declare `prompt_shape`, a hand-written sketch of its own JSON.
+    That is preferred when present, because generated JSON Schema is correct,
+    exhaustive and expensive — 238 tokens for an extraction, 281 for a decision,
+    on every single call — and most of that is structural noise (`"type":
+    "object"`, `additionalProperties`, `$defs` indirection) the model does not
+    need in order to answer.
+
+    Falling back to generation means a new model works without ceremony; the
+    shape is an optimisation, not a requirement.
+
+    Titles and descriptions are stripped from the generated form — the prompt
+    already explains the task, and repeating it inside the schema wastes tokens
+    and invites the model to echo documentation back as field values.
     """
+    shape = getattr(response_model, "prompt_shape", None)
+    if isinstance(shape, str) and shape.strip():
+        return shape
+
     schema = response_model.model_json_schema(by_alias=True)
 
     def prune(node: Any) -> Any:

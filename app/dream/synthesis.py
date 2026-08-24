@@ -41,7 +41,7 @@ from app.core.metrics import (
 )
 from app.dream.candidate_selector import CandidateSelector
 from app.dream.clustering import Cluster, cluster_memories
-from app.dream.prompts import SYNTHESIS_SYSTEM, build_synthesis_payload
+from app.dream.prompts import build_synthesis_payload, synthesis_system
 from app.memory.lifecycle import MemoryLifecycle
 from app.models.dream import DreamJob, DreamOperation, PatternProposal, SynthesisDecision
 from app.models.enums import JobStatus, MemoryStatus, MemoryType, RelationType, SynthesisAction
@@ -209,7 +209,7 @@ class SynthesisEngine:
         try:
             with operation(OP_SYNTHESIZE):
                 result = await self._llm.generate_json(
-                    system=SYNTHESIS_SYSTEM,
+                    system=synthesis_system(self._settings.domain),
                     user=build_synthesis_payload(cluster.memories, known_patterns),
                     response_model=SynthesisDecision,
                 )

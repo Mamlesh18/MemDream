@@ -591,6 +591,29 @@ class Settings(BaseSettings):
     )
     anthropic_model: str = "claude-sonnet-4-5"
 
+    #: Skip the extraction call for messages that provably cannot contain a
+    #: memory — greetings, acknowledgements, bare questions. Typically a third
+    #: to a half of chat turns, each costing ~660 prompt tokens.
+    #:
+    #: Deliberately conservative: it fires only on a closed lexicon, never on
+    #: length, because "no onions" is nine characters and is a real memory.
+    #: Turn it off if you would rather pay than ever risk a missed fact.
+    triage_enabled: bool = True
+
+    # --- domain ------------------------------------------------------------ #
+    #
+    # One sentence describing what this deployment is, injected into the
+    # extraction and decision prompts. Empty by default.
+    #
+    # This is the cheapest accuracy win available. The prompts are deliberately
+    # generic and short; a single line of context tells the model that "no
+    # onions" is a standing constraint rather than small talk, which no amount
+    # of generic rule-writing conveys as well. It costs ~30 tokens per call.
+    #
+    #     DREAM_DOMAIN="A restaurant ordering assistant. Remember contact and
+    #     delivery details, dietary needs, dislikes, and usual orders per meal."
+    domain: str = Field(default="", max_length=400)
+
     # --- privacy ---------------------------------------------------------- #
     identity_salt: str = "dream-memory-default-salt"
 

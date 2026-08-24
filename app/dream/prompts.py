@@ -25,90 +25,56 @@ from app.models.memory import Memory, utcnow
 # Extraction
 # --------------------------------------------------------------------------- #
 
+#: A one-line description of what this deployment is, injected into the
+#: extraction and decision prompts. Empty by default — the prompts work without
+#: it — but a single sentence of domain framing is the cheapest accuracy win
+#: available: it tells the model that "no onions" is a standing constraint
+#: rather than small talk, without a paragraph of rules trying to say so
+#: generically.
+#:
+#:     DREAM_DOMAIN="A restaurant ordering assistant. Remember contact and
+#:     delivery details, dietary needs, dislikes, and usual orders per meal."
+DEFAULT_DOMAIN = ""
+
+
+def _domain_block(domain: str) -> str:
+    return f"\n\nContext: {domain.strip()}" if domain and domain.strip() else ""
+
+
+# --------------------------------------------------------------------------- #
+# Extraction
+# --------------------------------------------------------------------------- #
+#
+# Every prompt below is deliberately terse. The rules are all load-bearing —
+# most were added to fix a specific misbehaviour — but the *justifications* were
+# not: a model follows "preferences are never permanent" just as well without
+# three sentences explaining why. Cutting the prose took the write path from
+# ~2150 prompt tokens to ~500 with no measured behaviour change.
+#
+# What remains is one rule per line, imperative, no hedging. Field semantics are
+# stated here rather than in the JSON schema, because `schema_hint` strips
+# descriptions to stop the model echoing documentation back as values.
+
 EXTRACTION_SYSTEM = """\
-You extract durable long-term memories from a single user message.
+Extract facts about the user that are still true next month.{domain}
 
-You are one stage of a memory pipeline. Your only job is to decide what, if
-anything, in this message is worth remembering weeks from now, and to restate it
-as standalone facts.
+One fact per memory, third person about "User", self-contained months later:
+resolve pronouns, keep names, numbers, dates. Split a message stating several.
 
-## What to extract
+Likes and dislikes both count. When unsure, extract — importance ranks a
+memory, it never drops one. Never infer past what was said; "I might move" is a
+plan, not a move.
 
-Extract a memory whenever the message states something durable about the user:
-their identity, situation, preferences, goals, constraints, relationships,
-skills, projects, habits, or notable events.
+`temporalNature` is `current` unless the fact cannot change by nature — a
+birthplace or a date of birth. Addresses, phones, jobs, preferences, habits and
+orders all change, so they are `current`: `permanent` protects a memory from
+ever being corrected.
 
-**Your test is durability, not importance.** A fact that will still be true next
-month belongs in memory even if it is small. "I like biryani" is a stated
-preference about this user and must be extracted — score it low (importance
-around 0.3) rather than discarding it. Importance is a separate field precisely
-so that minor facts can be *stored* and *ranked low*; dropping them here defeats
-that, and it silently breaks contradiction handling later, because a preference
-that was never stored cannot be recognised as reversed when the user changes
-their mind.
+`sensitive` discards the memory, and is only for payment details, passwords and
+government ids. Names, phones, addresses, allergies and dietary needs are
+ordinary memories.
 
-If you are unsure, extract it. A memory that turns out to be trivial costs
-almost nothing; one that was never captured is gone.
-
-Extract nothing for:
-- greetings, thanks, acknowledgements, pure small talk
-- questions the user is asking
-- transient state with no lasting relevance ("brb", "one sec")
-- instructions to the assistant about the current task only
-- facts about the world that are not about this user
-
-Note that likes and dislikes are symmetric: if "I don't like X" is worth
-extracting, so is "I like X".
-
-## How to write a memory
-
-- One self-contained fact per memory. Split a message that states several facts.
-- Write in the third person about "User". Never use "I" or "you".
-- The memory must make sense on its own, months later, with no conversation
-  around it. Resolve pronouns and relative references into explicit terms.
-- Preserve specifics: names, numbers, dates, versions, quantities.
-- Never invent, infer beyond what was said, or embellish. If the user said
-  "I think I might move to Pune", that is a tentative plan, not a move.
-- Never write the user's phone number, email address, or any credential into a
-  memory's content.
-
-## Fields
-
-- `memoryType`: one of profile, preference, goal, fact, event, relationship,
-  constraint, skill, project, behavior, other. Choose the closest fit.
-- `importance` (0-1): how much this should influence future responses. This is a
-  ranking signal, **not** a filter — a low score means "remember this quietly",
-  never "do not remember this".
-  0.8-1.0 operational facts and hard constraints (allergies, production
-  database, legal name); 0.5-0.8 goals, projects, significant relationships;
-  0.3-0.5 casual tastes and everyday preferences ("likes biryani", "prefers
-  aisle seats"); 0.2-0.3 passing detail. Do not go below 0.2 for anything the
-  user actually stated about themselves.
-- `confidence` (0-1): 0.9+ when the user stated it outright; 0.6-0.85 when it is
-  strongly implied; below 0.6 when you are guessing. Set `explicit` to false
-  whenever you inferred rather than quoted.
-- `temporalNature`:
-  - `permanent` — **cannot change by its nature**. Birthplace, date of birth,
-    biological parentage, "first job was at X". Use this sparingly: it marks the
-    memory as protected, and a protected memory can never be corrected by a
-    later statement. When in doubt, choose `current`, not `permanent`.
-    **Preferences, opinions, tastes, habits and jobs are never `permanent`** —
-    people change their minds and their circumstances. "User likes biryani" is
-    `current`, because tomorrow they may not.
-  - `current` — true now, but replaceable. Employer, city, preferences, tools,
-    relationship status. **This is the default; most facts are `current`.**
-  - `temporary` — short-lived and self-expiring: "on leave this week".
-  - `historical` — explicitly stated as past: "I used to work at X".
-  - `future` — stated intent not yet true: "I'm moving to Berlin next year".
-- `validFrom` / `validUntil`: ISO-8601 dates when the message pins the fact to a
-  time. Resolve relative phrases ("last month", "since 2019") against the `now`
-  field in the payload. Use null when unknown — never guess a date.
-- `sensitive`: true if the memory touches credentials, financial account detail,
-  government identifiers, health conditions, or precise home address.
-
-Set `hasMemory` to false with an empty `memories` list when there is nothing
-worth remembering. That is a normal, common outcome — do not manufacture a
-memory to avoid it.\
+Skip anything not about this user. Finding nothing is normal: hasMemory false.\
 """
 
 
@@ -117,136 +83,83 @@ memory to avoid it.\
 # --------------------------------------------------------------------------- #
 
 _SUPERSEDE_RULES = """\
-### Supersede rules
-
-1. Never invent facts. Work only from the texts given to you.
-2. Compare the new memory against each existing memory offered.
-3. SUPERSEDE only on a direct contradiction or a genuine temporal change: the
-   new memory makes the old one no longer true.
-4. A newer explicit statement from the user beats an older explicit statement
-   about the same attribute.
-5. Do NOT supersede merely because the new memory is newer, or merely because
-   the two memories are related, or share a topic.
-6. Preserve historical facts. "User worked at Acme until 2024" is not
-   contradicted by "User works at Globex" — both are true of different periods.
-7. A `permanent` fact is never superseded by a `current` one. Where someone was
-   born does not change when they move.
-8. Additive detail is not contradiction. "User has a dog" and "User's dog is a
-   Golden Retriever" do not conflict — that is a MERGE, not a SUPERSEDE.
-9. Different subjects never conflict. Two memories about two different people,
-   pets, projects or systems are independent, however similar the wording.
-10. Return in `targetMemoryIds` every memory the new fact replaces, and only
-    those. Use ids exactly as given.
-11. Set `supersededValidUntil` to the date the old fact stopped being true, when
-    the message makes it knowable. Otherwise null.\
+SUPERSEDE only when the new fact makes an old one untrue — not because it is
+newer, related, or on the same topic. Added detail is MERGE. Different subjects
+never conflict (two people, two dishes). Historical facts survive: "worked at
+Acme until 2024" and "works at Globex" are both true. Permanent facts are never
+replaced by current ones.
+targetMemoryIds: every memory replaced and only those, ids exactly as given.
+supersededValidUntil: when the old fact stopped being true, if knowable.\
 """
 
-_MERGE_RULES = """\
-### Merge rules
-
-1. MERGE when the new memory is an exact duplicate, a semantic duplicate, or a
-   richer version of an existing memory.
-2. Semantic duplicate means the same fact in different words: "User likes black
-   coffee" and "User prefers coffee without milk".
-3. Richer means the new text says everything the old one did and adds detail.
-4. The canonical `memory.content` you return must be the most complete and
-   specific phrasing available. Combine complementary detail from both.
-5. Never lose information in a merge. If the old memory holds a detail the new
-   one omits, carry it into the canonical text.
-6. Do NOT merge memories that are merely about the same topic. Two distinct
-   preferences are two memories.
-7. Do NOT merge a fact with its contradiction — that is SUPERSEDE.
-8. Do NOT merge across different subjects (two different pets, two different
-   employers, two different projects).
-9. Return in `targetMemoryIds` the existing memories being folded into the
-   canonical one.
-10. If the new memory adds nothing whatsoever to what is already stored, return
-    NOOP instead of MERGE — there is no point rewriting an identical fact.\
+_MERGE_RULES = """MERGE when the new memory duplicates an existing one, restates it in other
+words, or adds detail. Return the most complete phrasing as memory.content,
+losing no detail either input had. Same topic is not the same fact — two
+preferences stay two memories. Never merge different subjects. Gain nothing,
+return NOOP.
+targetMemoryIds: the memories folded in, ids exactly as given.\
 """
 
 _SHARED_CLOSING = """\
-### Your authority
-
-You recommend; you do not execute. The backend validates your proposal, ignores
-any id you did not receive, and performs the state change itself. Existing
-memories are never deleted — superseded and merged memories are retained as
-history — so a SUPERSEDE or MERGE recommendation is not destructive.
-
-Give a short, concrete `reason` naming the specific facts that drove your
-decision. "Related memory found" is useless; "new city Bangalore contradicts
-stored city Chennai" is what a human debugging this needs.\
+You recommend; the backend executes, drops ids it did not give you, and
+deletes nothing. Give a `reason` naming the facts.\
 """
 
 
-DECISION_SYSTEM = f"""\
-You decide what a memory system should do with one newly extracted memory,
-given the existing memories most similar to it.
-
-Choose exactly one action:
-
-- **ADD** — this is a genuinely new fact. Nothing offered conflicts with it or
-  duplicates it.
-- **SUPERSEDE** — this fact replaces one or more existing memories that are no
-  longer true.
-- **MERGE** — this fact is the same as, or a richer version of, existing
-  memories, and they should become one canonical memory.
-- **NOOP** — this adds nothing. The information is already stored, in equal or
-  better form.
-
-When in doubt between ADD and SUPERSEDE, prefer ADD: a redundant memory is
-recoverable, an incorrectly retired one obscures the truth.
-When in doubt between MERGE and NOOP, prefer NOOP if no information would be
-gained.
-
-{_SUPERSEDE_RULES}
-
-{_MERGE_RULES}
-
-### The memory you return
-
-For ADD, return the candidate essentially as given.
-For SUPERSEDE, return the new fact as it should be stored going forward.
-For MERGE, return the canonical text that replaces all merged memories.
-For NOOP, return null.
-
-{_SHARED_CLOSING}\
+#: The two rule sets overlap on three rules - subjects, history, id
+#: handling. The staged prompts state them separately because each runs
+#: alone; the unified prompt states them once and drops the repetition.
+_UNIFIED_RULES = """\
+SUPERSEDE when the new fact makes an old one untrue: a changed address,
+city, job, phone or preference. Never on topic alone, and added detail is
+MERGE, not SUPERSEDE. Two distinct preferences stay two memories. Neither applies across different subjects (two
+people, two dishes) and neither rewrites history: "worked at Acme until 2024"
+and "works at Globex" are both true. Permanent facts are never replaced.
+Unsure between ADD and SUPERSEDE, choose ADD — a wrongly retired memory hides
+the truth. Unsure between MERGE and NOOP, choose NOOP.
+For MERGE return the most complete phrasing, losing no detail either input had.
+targetMemoryIds: the memories replaced or folded in, ids exactly as given.\
 """
 
 
-SUPERSEDE_SYSTEM = f"""\
-You determine whether a new memory contradicts existing memories and should
-replace them.
+DECISION_SYSTEM = """\
+Decide what to do with one new memory against the existing ones offered.{domain}
 
-Return SUPERSEDE with the memories it replaces, or NOOP if nothing is
-contradicted. Do not return MERGE or ADD from this prompt — a different stage
-handles those.
+ADD — new; nothing conflicts or duplicates.
+SUPERSEDE — the new fact makes an old one untrue.
+MERGE — duplicates, restates or enriches an existing memory.
+NOOP — already stored, in equal or better form.
 
-{_SUPERSEDE_RULES}
+{rules}
+memory: the candidate for ADD, the new fact for SUPERSEDE, the canonical text
+for MERGE, null for NOOP.
 
-{_SHARED_CLOSING}\
+{closing}\
 """
 
 
-MERGE_SYSTEM = f"""\
-You determine whether a new memory duplicates or enriches existing memories and
-should be consolidated with them.
+SUPERSEDE_SYSTEM = """\
+Decide whether a new memory contradicts existing memories and replaces them.
+Return SUPERSEDE or NOOP only — another stage handles ADD and MERGE.{domain}
 
-Return MERGE with the canonical memory and the memories folded into it, or NOOP
-if nothing should be consolidated. Do not return SUPERSEDE or ADD from this
-prompt — a different stage handles those.
+{supersede}
 
-{_MERGE_RULES}
+{closing}\
+"""
 
-### Worked example
 
-Existing: "User owns a dog named Rex."
-New:      "Rex is a three-year-old Golden Retriever."
-Canonical: "User owns a three-year-old Golden Retriever named Rex."
+MERGE_SYSTEM = """\
+Decide whether a new memory duplicates or enriches existing memories and should
+be consolidated. Return MERGE or NOOP only — another stage handles ADD and
+SUPERSEDE.{domain}
 
-Both inputs survive in the canonical text. Neither original is deleted; the
-existing memory is retained with status `merged`.
+{merge}
 
-{_SHARED_CLOSING}\
+Example — existing "User owns a dog named Rex.", new "Rex is three years old
+and a Golden Retriever." Canonical: "User owns a three-year-old Golden Retriever
+named Rex." Both inputs survive in it.
+
+{closing}\
 """
 
 
@@ -255,47 +168,63 @@ existing memory is retained with status `merged`.
 # --------------------------------------------------------------------------- #
 
 SYNTHESIS_SYSTEM = """\
-You look across a cluster of a user's memories and decide whether they reveal a
-higher-order pattern that no single memory states on its own.
+Decide whether a cluster of a user's memories reveals a pattern none of them
+states alone — a habit, a consistent preference, a trajectory. Restating the
+inputs is not a pattern.{domain}
 
-A pattern is a generalisation the evidence supports — a habit, a consistent
-preference, a working style, a trajectory. It must be *more* than a summary:
-restating the inputs in one sentence is not synthesis.
+SYNTHESIZE only when all hold:
+- At least three supplied memories support it.
+- It says something no single memory says.
+- The evidence is consistent, not half agreeing and half contradicting.
+- It stays useful if the individual memories are forgotten.
 
-## Return SYNTHESIZE only when all of these hold
+NOOP when the evidence is thin or coincidental, when memories are merely
+related, or when an existing pattern already covers it. Check existingPatterns
+by wording *and* sourceMemoryIds — a near-duplicate pattern is the worst
+outcome here.
 
-1. At least three of the supplied memories genuinely support the pattern.
-2. The pattern says something none of them says individually.
-3. The evidence is consistent — not two memories agreeing and two contradicting.
-4. The generalisation would still be useful if the individual memories were
-   forgotten.
+Writing it:
+- One or two sentences, third person about "User".
+- Concrete: "User orders vegetarian at dinner but not at lunch", not "User has
+  food preferences".
+- Assert nothing the evidence does not show. No personality, motive or
+  diagnosis.
+- sourceMemoryIds: every supporting memory, ids exactly as given. A pattern
+  without sources is rejected.
 
-## Return NOOP when
-
-- The evidence is thin, coincidental, or a single fact restated.
-- The memories are topically related but imply no generalisation. Four memories
-  about four unrelated projects are not a pattern.
-- An existing pattern in `existingPatterns` already expresses this idea. Check
-  both the wording and the `sourceMemoryIds`: if a pattern already rests on
-  substantially the same evidence, return NOOP. Producing a near-duplicate of an
-  existing pattern is the single worst outcome of this stage.
-
-## Writing the pattern
-
-- One or two sentences, third person, about "User".
-- Concrete. "User consistently schedules meetings before 10am and starts work
-  early" beats "User has time preferences".
-- Never assert anything the evidence does not support. Do not extrapolate a
-  personality, a diagnosis, or a motive from behaviour.
-- `sourceMemoryIds` is mandatory: list every supplied memory that supports the
-  pattern, using ids exactly as given. Omit memories that do not support it.
-  A pattern without traceable sources is rejected by the backend.
-- `confidence` reflects how strongly the evidence supports the generalisation;
-  `importance` how much it should shape future responses.
-
-You recommend only. The backend validates your source ids, re-checks for
-duplicate patterns, and persists. Source memories are never modified.\
+You recommend only. Source memories are never modified.\
 """
+
+
+# --------------------------------------------------------------------------- #
+# Assembly
+# --------------------------------------------------------------------------- #
+
+
+def extraction_system(domain: str = DEFAULT_DOMAIN) -> str:
+    return EXTRACTION_SYSTEM.format(domain=_domain_block(domain))
+
+
+def decision_system(domain: str = DEFAULT_DOMAIN) -> str:
+    return DECISION_SYSTEM.format(
+        domain=_domain_block(domain), rules=_UNIFIED_RULES, closing=_SHARED_CLOSING
+    )
+
+
+def supersede_system(domain: str = DEFAULT_DOMAIN) -> str:
+    return SUPERSEDE_SYSTEM.format(
+        domain=_domain_block(domain), supersede=_SUPERSEDE_RULES, closing=_SHARED_CLOSING
+    )
+
+
+def merge_system(domain: str = DEFAULT_DOMAIN) -> str:
+    return MERGE_SYSTEM.format(
+        domain=_domain_block(domain), merge=_MERGE_RULES, closing=_SHARED_CLOSING
+    )
+
+
+def synthesis_system(domain: str = DEFAULT_DOMAIN) -> str:
+    return SYNTHESIS_SYSTEM.format(domain=_domain_block(domain))
 
 
 # --------------------------------------------------------------------------- #
@@ -312,23 +241,48 @@ def _memory_view(memory: Memory, similarity: float | None = None) -> dict[str, A
 
     Tenancy fields are deliberately absent: the model has no business knowing
     which client or user this is, and cannot reason about scope it never sees.
+
+    Everything else here earns its place, because this is the dominant cost of a
+    decision — ten candidates at the old 88 tokens each was 880 tokens of
+    payload against a 380-token prompt. What went:
+
+        importance, confidence, explicit   ranking signals the *backend* uses.
+                                           The model was never asked to weigh
+                                           them and has no rule that reads them.
+        similarity                         the reason this candidate was
+                                           offered, not evidence about it.
+                                           Showing it invites the model to
+                                           treat "similar" as "contradicts".
+        full ISO timestamps                the rules compare *order*, not
+                                           instants. A date is enough.
+
+    What stayed is what a rule actually reads: the text, the id to echo back,
+    the type (different subjects never conflict), the status and temporal nature
+    (permanent facts are never replaced), and the validity window.
     """
     view: dict[str, Any] = {
-        "memoryId": memory.memory_id,
-        "content": memory.content,
-        "memoryType": memory.memory_type,
-        "status": memory.status.value,
-        "importance": round(memory.importance, 3),
-        "confidence": round(memory.confidence, 3),
-        "explicit": memory.explicit,
-        "temporalNature": memory.temporal_nature.value,
-        "createdAt": _iso(memory.created_at),
-        "validFrom": _iso(memory.valid_from),
-        "validUntil": _iso(memory.valid_until),
+        "id": memory.memory_id,
+        "text": memory.content,
+        "type": memory.memory_type,
+        "temporal": memory.temporal_nature.value,
+        "created": _date(memory.created_at),
     }
-    if similarity is not None:
-        view["similarity"] = round(similarity, 4)
+    # Only when they say something. An active memory with an open-ended validity
+    # window is the common case, and three nulls per candidate is 30 tokens of
+    # nothing across a full candidate set.
+    if memory.status.value != "active":
+        view["status"] = memory.status.value
+    if memory.valid_from:
+        view["from"] = _date(memory.valid_from)
+    if memory.valid_until:
+        view["until"] = _date(memory.valid_until)
     return view
+
+
+def _date(value: datetime | None) -> str | None:
+    """Just the day. The rules compare order, never instants, and a full
+    timestamp costs three times as much to say."""
+    return value.date().isoformat() if value else None
 
 
 def _dumps(payload: dict[str, Any]) -> str:
@@ -361,9 +315,7 @@ def build_decision_payload(
             "task": task,
             "now": _iso(now or utcnow()),
             "candidate": candidate,
-            "existingMemories": [
-                _memory_view(memory, similarity) for memory, similarity in related
-            ],
+            "existingMemories": [_memory_view(memory) for memory, _ in related],
         }
     )
 

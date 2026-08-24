@@ -18,7 +18,7 @@ from datetime import datetime
 
 from app.core.config import MergeSettings
 from app.core.logging import get_logger
-from app.dream.prompts import MERGE_SYSTEM, build_decision_payload
+from app.dream.prompts import build_decision_payload, merge_system
 from app.dream.validation import ValidatedDecision, validate_decision
 from app.memory.lifecycle import MemoryLifecycle
 from app.models.dream import DreamDecision
@@ -38,11 +38,13 @@ class MergeEngine:
         lifecycle: MemoryLifecycle,
         repository: MemoryRepository,
         settings: MergeSettings | None = None,
+        domain: str = "",
     ) -> None:
         self._llm = llm
         self._lifecycle = lifecycle
         self._repository = repository
         self._settings = settings or MergeSettings()
+        self._domain = domain
 
     @property
     def enabled(self) -> bool:
@@ -98,7 +100,7 @@ class MergeEngine:
     ) -> tuple[ValidatedDecision, LLMResult[DreamDecision]]:
         """Ask the focused merge question. Used in ``staged`` decision mode."""
         result = await self._llm.generate_json(
-            system=MERGE_SYSTEM,
+            system=merge_system(self._domain),
             user=build_decision_payload(candidate, related, now=now, task="decide"),
             response_model=DreamDecision,
         )

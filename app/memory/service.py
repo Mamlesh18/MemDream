@@ -121,6 +121,26 @@ class MemoryService:
             )
             if not candidates:
                 logger.info("no_memories_extracted", reason=extraction.reason)
+                # Record it. "Nothing was remembered" is the most common outcome
+                # and the most asked-about, and until this existed it was the
+                # one case that left no audit row at all — so the log could not
+                # answer the question it exists for.
+                await self._audit.record(
+                    DreamOperation(
+                        **scope.as_model_fields(),
+                        action="NOOP",
+                        reason=extraction.reason or "no durable memory in this message",
+                        input_content=prompt,
+                        model=extraction.model,
+                        # The gate answers without a model, and saying so is the
+                        # point: it separates "the model saw this and declined"
+                        # from "we never asked".
+                        provider="triage" if extraction.skipped else None,
+                        latency_ms=extraction.latency_ms,
+                        token_usage=extraction.token_usage,
+                        request_id=request_id,
+                    )
+                )
                 return outcome
 
         for candidate in candidates:

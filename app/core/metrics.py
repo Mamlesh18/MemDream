@@ -26,6 +26,9 @@ NOOP_DECISIONS = "noop_decisions"
 LLM_CALLS = "llm_calls"
 LLM_ERRORS = "llm_errors"
 EMBEDDING_CALLS = "embedding_calls"
+#: Messages the triage gate answered without an LLM call, by reason.
+#: The gap between this and `llm_calls` is what the gate is saving you.
+EXTRACTION_SKIPPED = "extraction_skipped"
 EMBEDDING_ERRORS = "embedding_errors"
 VECTOR_SEARCHES = "vector_searches"
 SYNTHESIS_RUNS = "synthesis_runs"

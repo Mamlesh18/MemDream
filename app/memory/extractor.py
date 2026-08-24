@@ -13,9 +13,10 @@ from datetime import datetime
 from app.core.config import Settings, get_settings
 from app.core.exceptions import LLMResponseError, ProviderError
 from app.core.logging import get_logger
-from app.core.metrics import OP_EXTRACT, operation
+from app.core.metrics import EXTRACTION_SKIPPED, OP_EXTRACT, metrics, operation
 from app.core.policy import MemoryPolicy
-from app.dream.prompts import EXTRACTION_SYSTEM, build_extraction_payload
+from app.dream.prompts import build_extraction_payload, extraction_system
+from app.memory.triage import skip_reason
 from app.models.dream import ExtractedMemory, ExtractionResult
 from app.models.memory import utcnow
 from app.providers.llm.base import LLMProvider
@@ -33,6 +34,9 @@ class ExtractionOutcome:
     model: str | None = None
     latency_ms: float = 0.0
     token_usage: dict[str, int] = field(default_factory=dict)
+    #: True when the gate answered without an LLM call at all. Keeps
+    #: "nothing worth remembering" distinguishable from "we never asked".
+    skipped: bool = False
 
     @property
     def has_memories(self) -> bool:
@@ -69,13 +73,20 @@ class MemoryExtractor:
         already the common case. The error is logged and surfaced in `reason`.
         """
         text = (prompt or "").strip()
-        if not text:
-            return ExtractionOutcome(reason="empty prompt")
+
+        # The cheapest decision in the system. A greeting costs one token to say
+        # and ~660 to reason about, and cannot contain a memory. The gate only
+        # fires when it is certain — see app/memory/triage.py for why it is a
+        # lexicon rather than a heuristic.
+        if self._settings.triage_enabled and (reason := skip_reason(text)):
+            metrics.increment(EXTRACTION_SKIPPED, labels={"reason": reason})
+            logger.debug("extraction_skipped", reason=reason)
+            return ExtractionOutcome(reason=reason, skipped=True)
 
         try:
             with operation(OP_EXTRACT):
                 result = await self._llm.generate_json(
-                    system=EXTRACTION_SYSTEM,
+                    system=extraction_system(self._settings.domain),
                     user=build_extraction_payload(
                         text, now=now or utcnow(), message_id=message_id
                     ),

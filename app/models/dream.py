@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -109,6 +109,20 @@ class ExtractedMemory(_LLMModel):
 
 
 class ExtractionResult(_LLMModel):
+    prompt_shape: ClassVar[str] = """\
+Reply with JSON only:
+{"hasMemory":bool,"reason":str,"memories":[{
+ "content":str,
+ "memoryType":"profile|preference|goal|fact|event|relationship|constraint|skill|project|behavior|other",
+ "importance":0..1,    // .8 allergy/address, .5 standing order, .3 taste
+ "confidence":0..1,    // .9 if stated outright
+ "explicit":bool,      // false if inferred
+ "temporalNature":"permanent|current|temporary|historical|future",
+ "validFrom":iso|null,"validUntil":iso|null,
+ "sensitive":bool      // payment, password, government id only
+}]}\
+    """
+
     """The extractor's full response for one prompt."""
 
     has_memory: bool = False
@@ -148,6 +162,17 @@ class ProposedMemory(_LLMModel):
 
 
 class DreamDecision(_LLMModel):
+    prompt_shape: ClassVar[str] = """\
+Reply with JSON only:
+{"action":"ADD|SUPERSEDE|MERGE|NOOP",
+ "reason":str,             // name the facts, not "related memory found"
+ "targetMemoryIds":[str],  // ids from existingMemories; [] for ADD/NOOP
+ "supersededValidUntil":iso|null,
+ "memory":{"content":str,"memoryType":str,"importance":0..1,
+           "confidence":0..1,"temporalNature":str,
+           "validFrom":iso|null,"validUntil":iso|null}|null}\
+    """
+
     """The reasoner's recommendation for one candidate memory.
 
     ``target_memory_ids`` must reference memories that were supplied in the
@@ -202,6 +227,13 @@ class PatternProposal(_LLMModel):
 
 
 class SynthesisDecision(_LLMModel):
+    prompt_shape: ClassVar[str] = """\
+Reply with JSON only:
+{"action":"SYNTHESIZE|NOOP","reason":str,
+ "pattern":{"content":str,"confidence":0..1,"importance":0..1,
+            "sourceMemoryIds":[str]}|null}   // required, ids as given\
+    """
+
     action: SynthesisAction = SynthesisAction.NOOP
     reason: str = ""
     pattern: PatternProposal | None = None

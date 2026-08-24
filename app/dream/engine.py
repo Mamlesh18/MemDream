@@ -35,7 +35,7 @@ from app.core.metrics import (
     operation,
 )
 from app.dream.merge import MergeEngine
-from app.dream.prompts import DECISION_SYSTEM, build_decision_payload
+from app.dream.prompts import build_decision_payload, decision_system
 from app.dream.supersede import SupersedeEngine
 from app.dream.validation import ValidatedDecision, build_memory, validate_decision
 from app.memory.lifecycle import MemoryLifecycle
@@ -95,8 +95,13 @@ class DreamEngine:
         self._settings = settings or get_settings()
         self._dream = self._settings.dream
 
-        self.supersede_engine = SupersedeEngine(llm, lifecycle, self._dream.supersede)
-        self.merge_engine = MergeEngine(llm, lifecycle, repository, self._dream.merge)
+        domain = self._settings.domain
+        self.supersede_engine = SupersedeEngine(
+            llm, lifecycle, self._dream.supersede, domain=domain
+        )
+        self.merge_engine = MergeEngine(
+            llm, lifecycle, repository, self._dream.merge, domain=domain
+        )
 
     # --- public API ---------------------------------------------------------------- #
 
@@ -287,7 +292,7 @@ class DreamEngine:
     ) -> tuple[ValidatedDecision, str, float | None, dict[str, int]]:
         with operation(OP_DECIDE):
             result = await self._llm.generate_json(
-                system=DECISION_SYSTEM,
+                system=decision_system(self._settings.domain),
                 user=build_decision_payload(candidate_view, related, now=now),
                 response_model=DreamDecision,
             )
