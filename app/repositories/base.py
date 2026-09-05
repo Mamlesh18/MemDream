@@ -138,6 +138,20 @@ class MemoryRepository(ABC):
     ) -> list[str]: ...
 
     @abstractmethod
+    async def record_recall(
+        self, scope: MemoryScope, memory_ids: list[str], *, at: datetime | None = None
+    ) -> int:
+        """Note that these memories were returned by a search.
+
+        Sets `lastRecalledAt` and increments `recallCount`. **Must not touch
+        `updatedAt`** — a read is not a write, and letting it count as one would
+        feed the ranker's recency term back into itself.
+
+        Best-effort by contract: callers treat a failure here as nothing
+        happened, because losing a recall count must never fail a search.
+        """
+
+    @abstractmethod
     async def mark_stale(
         self, scope: MemoryScope, memory_ids: list[str], stale: bool = True
     ) -> int:

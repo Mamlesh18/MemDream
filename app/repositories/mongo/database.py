@@ -171,6 +171,10 @@ class MongoDatabase(Database):
                     [*_SCOPE_KEYS, ("validFrom", DESCENDING), ("validUntil", DESCENDING)],
                     name="scope_validity",
                 ),
+                # Consolidation's working set: what has not been useful lately.
+                IndexModel(
+                    [*_SCOPE_KEYS, ("lastRecalledAt", ASCENDING)], name="scope_recall"
+                ),
                 # Finding the patterns that rest on a memory that just changed.
                 IndexModel([("sourceMemoryIds", ASCENDING)], name="source_memory_ids"),
             ]

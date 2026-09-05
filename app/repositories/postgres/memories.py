@@ -67,6 +67,8 @@ MEMORY_COLUMNS: tuple[str, ...] = (
     "embedding_model",
     "embedding_dim",
     "content_hash",
+    "last_recalled_at",
+    "recall_count",
     "stale",
     "last_synthesized_at",
     "metadata",
@@ -350,6 +352,21 @@ class PostgresMemoryRepository(MemoryRepository):
             status.value,
         )
         return [record["memory_id"] for record in records]
+
+    async def record_recall(
+        self, scope: MemoryScope, memory_ids: list[str], *, at: datetime | None = None
+    ) -> int:
+        if not memory_ids:
+            return 0
+        # No `updated_at` here, on purpose — see the contract in base.py.
+        status = await self._pool.execute(
+            f"UPDATE {MEMORIES} SET last_recalled_at = $1, recall_count = recall_count + 1 "
+            "WHERE memory_id = ANY($2) AND scope_key = $3",
+            at or utcnow(),
+            memory_ids,
+            scope.scope_key,
+        )
+        return int(status.rsplit(" ", 1)[-1]) if status else 0
 
     async def mark_stale(
         self, scope: MemoryScope, memory_ids: list[str], stale: bool = True

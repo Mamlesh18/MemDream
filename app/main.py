@@ -70,11 +70,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001 - housekeeping must not stop startup
         logger.warning("stale_job_reap_failed", error=str(exc)[:200])
 
+    # The nightly consolidation clock. An asyncio task, not a cron container:
+    # MemDream deploys as one process, and a job this cheap does not justify a
+    # second one. Started here rather than in the container so it only runs in
+    # the API, never in a test or a script that builds a container of its own.
+    from app.dream.scheduler import ConsolidationScheduler
+
+    container.scheduler = ConsolidationScheduler(container, settings)
+    container.scheduler.start()
+
     try:
         yield
     finally:
-        # Closes the container, which drains in-flight synthesis first.
         logger.info("dream_memory_stopping")
+        if container.scheduler is not None:
+            await container.scheduler.stop()
+        # Closes the container, which drains in-flight synthesis first.
         await container.close()
 
 

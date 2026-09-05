@@ -132,6 +132,22 @@ class Memory(BaseModel):
 
     # --- bookkeeping -------------------------------------------------------- #
     content_hash: str = ""
+
+    # --- recall ------------------------------------------------------------ #
+    #
+    # How often this memory has actually been *useful*, as opposed to how often
+    # it has been written to. It is the signal consolidation needs in order to
+    # forget anything responsibly: age alone is the wrong measure, because a
+    # peanut allergy nobody has asked about in a year still matters more than
+    # yesterday's lunch order.
+    #
+    # Deliberately kept out of `updated_at`. A read is not a write, and letting
+    # searches bump `updated_at` would feed the recency term of the ranker back
+    # into itself — every search would make its own results look fresher, and
+    # popular memories would climb forever.
+    last_recalled_at: datetime | None = None
+    recall_count: int = 0
+
     #: Set when a source memory of a pattern changes state, marking the pattern
     #: for re-evaluation. Never triggers automatic deletion (see §32).
     stale: bool = False

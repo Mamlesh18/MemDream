@@ -241,6 +241,60 @@ class SynthesisSettings(BaseModel):
     drain_seconds: float = 30.0
 
 
+class ConsolidationSettings(BaseModel):
+    """Retiring memories that no longer earn their place.
+
+    Forgetting here means a status transition to `expired`, never a delete: the
+    row leaves the search index and stays auditable. That is what makes it safe
+    to act on a heuristic — being wrong costs a flip, not a row.
+    """
+
+    enabled: bool = True
+    #: Ceiling on memories examined in one pass, so a very large account cannot
+    #: turn a nightly sweep into an unbounded scan.
+    max_per_run: int = 500
+
+    # --- the nightly clock ---------------------------------------------- #
+
+    schedule_enabled: bool = True
+    #: Hour of the day, UTC. Default is midnight UTC; move it to your own quiet
+    #: hour rather than everyone else's.
+    schedule_hour_utc: int = Field(default=0, ge=0, le=23)
+
+    # --- recall decay ---------------------------------------------------- #
+    #
+    # **Off by default, and it must stay off until you have watched it.**
+    #
+    # Expiring a memory because nothing has recalled it is a judgement, not a
+    # fact — unlike a closed validity window, which is provably false. Judgement
+    # needs evidence, and the evidence is `lastRecalledAt`, which only starts
+    # accumulating the day recall tracking is switched on.
+    #
+    # Leave `decay_enabled` false and read `consolidation_would_expire` in the
+    # logs for a few weeks. Set the thresholds from what you see, the way the
+    # similarity bands were measured. Then turn it on.
+
+    decay_enabled: bool = False
+    #: Not recalled within this many days is the *candidate* condition. Every
+    #: guard below still has to pass.
+    decay_after_days: int = 90
+    #: Importance at or above this is never decayed, however long it sits
+    #: untouched. An allergy nobody has asked about in a year still outranks
+    #: yesterday's lunch order, and this is the line that says so.
+    decay_importance_floor: float = Field(default=0.5, ge=0.0, le=1.0)
+    #: When recall tracking began, as an ISO date. **The cold-start guard.**
+    #:
+    #: Every memory written before tracking existed has `lastRecalledAt: null`,
+    #: which is indistinguishable from "never used" — so on the day you enable
+    #: decay, the entire database looks maximally stale and would be expired in
+    #: one pass. Setting this makes a memory eligible only once the decay window
+    #: has elapsed *since tracking started*, giving every row a fair chance to
+    #: be recalled before it is judged.
+    #:
+    #: Empty disables recall decay outright, whatever `decay_enabled` says.
+    recall_epoch: str = ""
+
+
 class DreamSettings(BaseModel):
     #: ``unified``  — one LLM call decides ADD / SUPERSEDE / MERGE / NOOP.
     #: ``staged``   — a merge-focused call, then a supersede-focused call, each
@@ -254,6 +308,7 @@ class DreamSettings(BaseModel):
     supersede: SupersedeSettings = Field(default_factory=SupersedeSettings)
     merge: MergeSettings = Field(default_factory=MergeSettings)
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
+    consolidation: ConsolidationSettings = Field(default_factory=ConsolidationSettings)
 
 
 class MemoryPolicySettings(BaseModel):
@@ -590,6 +645,15 @@ class Settings(BaseSettings):
         ),
     )
     anthropic_model: str = "claude-sonnet-4-5"
+
+    #: Record which memories each search returned, so consolidation can later
+    #: tell what is still earning its place from what nothing has needed in
+    #: months. Costs one indexed bulk update per search.
+    #:
+    #: It collects only — nothing reads it yet, and nothing will until it has
+    #: been running long enough for the signal to mean something. Decay
+    #: thresholds set against a week of data would be guesses.
+    track_recall: bool = True
 
     #: Skip the extraction call for messages that provably cannot contain a
     #: memory — greetings, acknowledgements, bare questions. Typically a third

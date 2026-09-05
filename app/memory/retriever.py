@@ -172,6 +172,8 @@ class MemoryRetriever:
             ]
             results = self._ranker.rank(pairs, limit=limit, min_score=min_score)
 
+        await self._record_recall(scope, [item.memory.memory_id for item in results])
+
         logger.debug(
             "memory_search",
             eligible=len(allowed),
@@ -179,6 +181,28 @@ class MemoryRetriever:
             returned=len(results),
         )
         return results
+
+    async def _record_recall(self, scope: MemoryScope, memory_ids: list[str]) -> None:
+        """Note which memories this search actually returned.
+
+        Collected so consolidation can later tell a memory that is still earning
+        its place from one nothing has needed in months. Age alone is the wrong
+        measure — an allergy nobody has asked about in a year still outranks
+        yesterday's lunch order — and recall is the signal that separates them.
+
+        Only the results are counted, not everything the vector store looked at:
+        being *considered* is not the same as being *used*.
+
+        One indexed bulk update, and never allowed to fail the search. Losing a
+        recall count costs a little precision in a decision months away; failing
+        the read costs the user their answer now.
+        """
+        if not memory_ids or not self._settings.track_recall:
+            return
+        try:
+            await self._repository.record_recall(scope, memory_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("recall_tracking_failed", error=str(exc)[:200])
 
     # --- candidate selection for Dream ---------------------------------------- #
 

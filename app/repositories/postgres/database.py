@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS {MEMORIES} (
     embedding_dim       INTEGER,
 
     content_hash        TEXT NOT NULL DEFAULT '',
+
+    -- How often this memory has been useful, as opposed to written to. The
+    -- signal consolidation needs before it can forget anything responsibly.
+    last_recalled_at    TIMESTAMPTZ,
+    recall_count        INTEGER NOT NULL DEFAULT 0,
+
     stale               BOOLEAN NOT NULL DEFAULT FALSE,
     last_synthesized_at TIMESTAMPTZ,
     metadata            JSONB NOT NULL DEFAULT '{{}}'::jsonb
@@ -118,6 +124,10 @@ CREATE INDEX IF NOT EXISTS {MEMORIES}_scope_created
 -- Point-in-time queries over the validity window.
 CREATE INDEX IF NOT EXISTS {MEMORIES}_scope_validity
     ON {MEMORIES} (scope_key, valid_from DESC, valid_until DESC);
+-- Consolidation's working set: what has not been useful lately. Ordering is
+-- nulls-first so never-recalled memories surface before merely-stale ones.
+CREATE INDEX IF NOT EXISTS {MEMORIES}_scope_recall
+    ON {MEMORIES} (scope_key, last_recalled_at ASC NULLS FIRST);
 -- Finding the patterns that rest on a memory that just changed. GIN because
 -- the predicate is array containment, which btree cannot answer.
 CREATE INDEX IF NOT EXISTS {MEMORIES}_source_memory_ids

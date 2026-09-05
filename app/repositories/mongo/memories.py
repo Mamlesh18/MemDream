@@ -244,6 +244,18 @@ class MongoMemoryRepository(MemoryRepository):
         )
         return [doc["_id"] async for doc in cursor]
 
+    async def record_recall(
+        self, scope: MemoryScope, memory_ids: list[str], *, at: datetime | None = None
+    ) -> int:
+        if not memory_ids:
+            return 0
+        result = await self._db.memories.update_many(
+            {"_id": {"$in": memory_ids}, **scope.as_filter()},
+            # No `updatedAt` here, on purpose — see the contract in base.py.
+            {"$set": {"lastRecalledAt": at or utcnow()}, "$inc": {"recallCount": 1}},
+        )
+        return result.modified_count
+
     async def mark_stale(
         self, scope: MemoryScope, memory_ids: list[str], stale: bool = True
     ) -> int:

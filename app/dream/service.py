@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.core.config import Settings, get_settings
 from app.core.exceptions import JobNotFoundError, TenantIsolationError
 from app.core.logging import get_logger
+from app.dream.consolidation import ConsolidationEngine
 from app.dream.synthesis import SynthesisEngine
 from app.models.dream import DreamJob
 from app.models.enums import JobStatus
@@ -26,12 +27,14 @@ class DreamService:
         self,
         *,
         synthesis: SynthesisEngine,
+        consolidation: ConsolidationEngine | None = None,
         jobs: JobRepository,
         memories: MemoryRepository,
         queue: JobQueue,
         settings: Settings | None = None,
     ) -> None:
         self._synthesis = synthesis
+        self._consolidation = consolidation
         self._jobs = jobs
         self._memories = memories
         self._queue = queue
@@ -172,6 +175,18 @@ class DreamService:
 
         await self._jobs.mark_running(job.job_id)
         job.status = JobStatus.RUNNING
+
+        # Consolidate before synthesising. Retiring facts whose validity window
+        # has closed means the clusterer works over what is still true, rather
+        # than finding a pattern in something that stopped being the case in
+        # March. Deterministic and cheap — no model, no embedding.
+        if self._consolidation is not None and self._settings.dream.consolidation.enabled:
+            try:
+                outcome = await self._consolidation.run(job_scope)
+                if outcome.expired_count:
+                    job.metadata["consolidation"] = outcome.as_dict()
+            except Exception as exc:  # noqa: BLE001 - housekeeping must not fail the job
+                logger.warning("consolidation_failed", error=str(exc)[:200])
 
         job = await self._synthesis.run(
             job_scope,

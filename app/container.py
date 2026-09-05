@@ -19,7 +19,9 @@ from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.core.metrics import metrics
 from app.core.policy import MemoryPolicy
+from app.dream.consolidation import ConsolidationEngine
 from app.dream.engine import DreamEngine
+from app.dream.scheduler import ConsolidationScheduler
 from app.dream.service import DreamService
 from app.dream.synthesis import SynthesisEngine
 from app.memory.extractor import MemoryExtractor
@@ -64,8 +66,14 @@ class DreamContainer:
 
     dream_engine: DreamEngine
     synthesis: SynthesisEngine
+    consolidation: ConsolidationEngine
     memory_service: MemoryService
     dream_service: DreamService
+
+    #: The nightly consolidation clock. Attached by the API lifespan, so a
+    #: container built by a test or a script never starts a background task it
+    #: did not ask for.
+    scheduler: ConsolidationScheduler | None = None
 
     @classmethod
     async def create(
@@ -127,6 +135,7 @@ class DreamContainer:
             audit=audit,
             settings=settings,
         )
+        consolidation = ConsolidationEngine(memories, lifecycle, settings)
         synthesis = SynthesisEngine(
             llm=llm,
             embeddings=embeddings,
@@ -147,6 +156,7 @@ class DreamContainer:
         )
         dream_service = DreamService(
             synthesis=synthesis,
+            consolidation=consolidation,
             jobs=jobs,
             memories=memories,
             queue=queue,
@@ -171,6 +181,7 @@ class DreamContainer:
             extractor=extractor,
             dream_engine=dream_engine,
             synthesis=synthesis,
+            consolidation=consolidation,
             memory_service=memory_service,
             dream_service=dream_service,
         )
