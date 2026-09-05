@@ -295,6 +295,34 @@ class ConsolidationSettings(BaseModel):
     recall_epoch: str = ""
 
 
+class CompactionSettings(BaseModel):
+    """Folding crowds of low-value memories into single summaries.
+
+    **Off by default.** This is the only part of consolidation that asks a model
+    to compress facts, and compression can drop one. Everything configured below
+    exists so that when it does, the loss is small and recoverable: the inputs
+    stay readable as `merged`, and nothing important is ever an input.
+    """
+
+    enabled: bool = False
+    #: Never compact a memory at or above this importance. An allergy, a
+    #: delivery address or a hard constraint must never reach the model.
+    importance_floor: float = Field(default=0.4, ge=0.0, le=1.0)
+    #: A user needs at least this many eligible memories before a model call is
+    #: worth making. This gate is what keeps a nightly pass affordable.
+    min_memories: int = 40
+    #: Recent memories are still doing their job; compacting something said
+    #: yesterday is compressing the conversation you are in.
+    min_age_days: int = 30
+    #: Clustering, deliberately tighter than synthesis: a summary must replace
+    #: memories that genuinely say the same kind of thing.
+    similarity_threshold: float = 0.55
+    min_cluster_size: int = 4
+    max_cluster_size: int = 12
+    max_clusters_per_run: int = 5
+    max_candidates: int = 300
+
+
 class DreamSettings(BaseModel):
     #: ``unified``  — one LLM call decides ADD / SUPERSEDE / MERGE / NOOP.
     #: ``staged``   — a merge-focused call, then a supersede-focused call, each
@@ -309,6 +337,7 @@ class DreamSettings(BaseModel):
     merge: MergeSettings = Field(default_factory=MergeSettings)
     synthesis: SynthesisSettings = Field(default_factory=SynthesisSettings)
     consolidation: ConsolidationSettings = Field(default_factory=ConsolidationSettings)
+    compaction: CompactionSettings = Field(default_factory=CompactionSettings)
 
 
 class MemoryPolicySettings(BaseModel):

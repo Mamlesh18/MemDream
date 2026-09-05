@@ -118,7 +118,10 @@ class ConsolidationScheduler:
         """
         with operation_context():
             scopes = await self._container.memories.distinct_scopes()
-            totals = {"partitions": len(scopes), "scanned": 0, "expired": 0, "failed": 0}
+            totals = {
+                "partitions": len(scopes), "scanned": 0, "expired": 0,
+                "compacted": 0, "absorbed": 0, "failed": 0,
+            }
             logger.info("consolidation_sweep_started", partitions=len(scopes))
 
             for entry in scopes:
@@ -132,6 +135,14 @@ class ConsolidationScheduler:
                     result = await self._container.consolidation.run(scope)
                     totals["scanned"] += result.scanned
                     totals["expired"] += result.expired_count
+
+                    # Retire what is dead first, then compress what is left —
+                    # no point spending a model call summarising memories that
+                    # were about to be expired anyway.
+                    if self._settings.dream.compaction.enabled:
+                        folded = await self._container.compaction.run(scope)
+                        totals["compacted"] += len(folded.compacted)
+                        totals["absorbed"] += folded.absorbed
                 except Exception as exc:  # noqa: BLE001 - one user must not stop the sweep
                     totals["failed"] += 1
                     logger.error(

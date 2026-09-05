@@ -290,7 +290,31 @@ class FakeLLMProvider(LLMProvider):
             return self._decide(payload)
         if task == "synthesize":
             return self._synthesize(payload)
+        if task == "compact":
+            return self._compact(payload)
         raise LLMResponseError(f"FakeLLMProvider has no heuristic for task {task!r}")
+
+    # -- compaction -- #
+
+    @staticmethod
+    def _compact(payload: dict[str, Any]) -> dict[str, Any]:
+        """Fold a cluster by concatenation.
+
+        Deliberately the dumbest summary that still satisfies the contract:
+        every input fact survives verbatim. A real model writes something
+        readable, but the property the tests care about is that nothing is
+        dropped — and a fake that quietly loses a fact would hide exactly the
+        regression this feature is most likely to have.
+        """
+        memories = payload.get("memories") or []
+        texts = [_view_text(item).rstrip(".") for item in memories if _view_text(item)]
+        if len(texts) < 2:
+            return {"keep": False, "summary": None, "reason": "not enough to fold"}
+        return {
+            "keep": True,
+            "summary": "; ".join(texts) + ".",
+            "reason": f"folded {len(texts)} memories",
+        }
 
     # -- extraction -- #
 

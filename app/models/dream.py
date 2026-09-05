@@ -226,6 +226,21 @@ class PatternProposal(_LLMModel):
         return value
 
 
+class CompactionResult(_LLMModel):
+    """One cluster folded into a single memory, or a refusal to fold it."""
+
+    prompt_shape: ClassVar[str] = """\
+Reply with JSON only:
+{"keep":bool,        // false if these do not belong together
+ "summary":str|null, // one or two sentences, every input fact preserved
+ "reason":str}\
+    """
+
+    keep: bool = False
+    summary: str | None = None
+    reason: str = ""
+
+
 class SynthesisDecision(_LLMModel):
     prompt_shape: ClassVar[str] = """\
 Reply with JSON only:

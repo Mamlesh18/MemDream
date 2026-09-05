@@ -72,8 +72,8 @@ async def test_decay_cannot_fire_before_the_epoch(container, scope):
     config = container.settings.dream.consolidation
     config.decay_enabled = True
     config.decay_after_days = 90
-    # Tracking started yesterday. Ninety days of silence cannot have been
-    # observed yet, however old the memory is.
+    # Tracking started yesterday. However old the memory is, ninety days of
+    # silence cannot have been *observed* yet — its window runs from the epoch.
     config.recall_epoch = (utcnow() - timedelta(days=1)).date().isoformat()
 
     engine = ConsolidationEngine(container.memories, container.lifecycle, container.settings)

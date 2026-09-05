@@ -30,6 +30,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -172,16 +173,41 @@ class FaissVectorStore(VectorStore):
         partition.index = self._new_index(dim)
         return partition
 
+    @staticmethod
+    def _replace(source: Path, target: Path, *, attempts: int = 5) -> None:
+        """`os.replace`, retried past a transient Windows lock.
+
+        The rename is atomic on both platforms, which is the whole reason for
+        the temp file. On Windows it can still fail with `Access is denied` for
+        a reason that has nothing to do with this process: a virus scanner or
+        the search indexer opens a file the moment it is written, and holds it
+        for a few milliseconds. `os.replace` cannot overwrite a target another
+        handle has open, so the write fails and — without this — takes the
+        caller's request with it.
+
+        Retrying briefly is the standard remedy. Anything still failing after a
+        second is a real permission problem and should surface as one.
+        """
+        for attempt in range(attempts):
+            try:
+                os.replace(source, target)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                logger.debug("faiss_replace_retry", target=target.name, attempt=attempt + 1)
+                time.sleep(0.05 * (attempt + 1))
+
     def _save_blocking(self, partition: _Partition) -> None:
         import faiss
 
         index_path, meta_path, _ = self._paths(partition.key)
 
-        # Write to a sibling temp file then rename: os.replace is atomic on both
-        # POSIX and Windows, so readers never observe a half-written index.
+        # Write to a sibling temp file then rename, so readers never observe a
+        # half-written index.
         tmp_index = index_path.with_suffix(".index.tmp")
         faiss.write_index(partition.index, str(tmp_index))
-        os.replace(tmp_index, index_path)
+        self._replace(tmp_index, index_path)
 
         tmp_meta = meta_path.with_suffix(".json.tmp")
         tmp_meta.write_text(
@@ -195,7 +221,7 @@ class FaissVectorStore(VectorStore):
             ),
             encoding="utf-8",
         )
-        os.replace(tmp_meta, meta_path)
+        self._replace(tmp_meta, meta_path)
         partition.mtime = meta_path.stat().st_mtime
 
     def _needs_reload(self, partition: _Partition) -> bool:

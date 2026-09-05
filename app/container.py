@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.core.metrics import metrics
 from app.core.policy import MemoryPolicy
+from app.dream.compaction import CompactionEngine
 from app.dream.consolidation import ConsolidationEngine
 from app.dream.engine import DreamEngine
 from app.dream.scheduler import ConsolidationScheduler
@@ -67,6 +68,7 @@ class DreamContainer:
     dream_engine: DreamEngine
     synthesis: SynthesisEngine
     consolidation: ConsolidationEngine
+    compaction: CompactionEngine
     memory_service: MemoryService
     dream_service: DreamService
 
@@ -136,6 +138,7 @@ class DreamContainer:
             settings=settings,
         )
         consolidation = ConsolidationEngine(memories, lifecycle, settings)
+        compaction = CompactionEngine(memories, lifecycle, llm, embeddings, settings)
         synthesis = SynthesisEngine(
             llm=llm,
             embeddings=embeddings,
@@ -182,6 +185,7 @@ class DreamContainer:
             dream_engine=dream_engine,
             synthesis=synthesis,
             consolidation=consolidation,
+            compaction=compaction,
             memory_service=memory_service,
             dream_service=dream_service,
         )

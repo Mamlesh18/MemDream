@@ -151,7 +151,7 @@ class ConsolidationEngine:
 
         protected = await self._pattern_evidence(scope)
 
-        cutoff = self._decay_cutoff(now)
+        epoch = self._recall_epoch()
 
         for memory in active:
             if memory.memory_type == MemoryType.PATTERN.value:
@@ -161,7 +161,7 @@ class ConsolidationEngine:
                 continue
 
             lapsed = memory.valid_until is not None and memory.valid_until <= now
-            decayed = cutoff is not None and self._has_decayed(memory, cutoff)
+            decayed = epoch is not None and self._has_decayed(memory, now, epoch)
             if not (lapsed or decayed):
                 continue
 
@@ -213,61 +213,59 @@ class ConsolidationEngine:
 
     # --- recall decay ---------------------------------------------------- #
 
-    def _decay_cutoff(self, now: datetime) -> datetime | None:
-        """The instant before which disuse counts, or None if it cannot yet.
+    def _recall_epoch(self) -> datetime | None:
+        """When recall tracking began, or None if it has not been declared.
 
-        Two things have to hold. The window must have elapsed — obviously — and
-        it must have elapsed *since recall tracking began*, which is the guard
-        that stops a fresh deployment expiring its entire database.
+        This is the cold-start guard, and it is required. Every memory written
+        before tracking existed carries `lastRecalledAt: null`, which reads
+        identically to "nothing has ever wanted this" — so on day one that is
+        true of the entire database. The epoch is what separates *we looked and
+        nobody used it* from *we were not looking*.
 
-        Every memory written before tracking existed carries
-        `lastRecalledAt: null`, which reads identically to "nothing has ever
-        wanted this". On day one that is true of everything. `recall_epoch` is
-        what separates "we have looked and nobody used it" from "we have not
-        been looking".
+        Unparseable fails closed: a typo in a date must not become a mass
+        expiry.
         """
-        config = self._settings.dream.consolidation
-        if not config.recall_epoch:
+        raw = self._settings.dream.consolidation.recall_epoch
+        if not raw:
             return None
-
         try:
-            epoch = datetime.fromisoformat(config.recall_epoch)
+            epoch = datetime.fromisoformat(raw)
         except ValueError:
-            logger.warning("recall_epoch_unparseable", value=config.recall_epoch[:32])
+            logger.warning("recall_epoch_unparseable", value=raw[:32])
             return None
-        if epoch.tzinfo is None:
-            epoch = epoch.replace(tzinfo=timezone.utc)
+        return epoch if epoch.tzinfo else epoch.replace(tzinfo=timezone.utc)
 
-        cutoff = now - timedelta(days=config.decay_after_days)
-        if cutoff <= epoch:
-            # Tracking has not been running long enough for silence to mean
-            # anything yet.
-            return None
-        return cutoff
-
-    def _has_decayed(self, memory: Memory, cutoff: datetime) -> bool:
+    def _has_decayed(self, memory: Memory, now: datetime, epoch: datetime) -> bool:
         """Whether disuse has earned this memory a retirement.
 
-        Every guard here is a veto, and each one exists because the alternative
-        is a specific, silent, expensive mistake.
+        Every guard is a veto, and each exists because the alternative is a
+        specific, silent, expensive mistake.
         """
+        config = self._settings.dream.consolidation
+
         # Importance outranks disuse, always. This is the line that keeps a
         # peanut allergy in the active set through a year of nobody asking.
-        if memory.importance >= self._settings.dream.consolidation.decay_importance_floor:
+        if memory.importance >= config.decay_importance_floor:
             return False
 
-        # `permanent` means the fact cannot change by its nature. Nothing about
-        # how often it is read bears on that.
+        # `permanent` means the fact cannot change by its nature. How often it
+        # is read has no bearing on that.
         if memory.temporal_nature is TemporalNature.PERMANENT:
             return False
 
-        last_touch = memory.last_recalled_at or memory.created_at
-        if last_touch > cutoff:
-            return False
+        # The last moment we have evidence this memory was wanted — or, failing
+        # that, the last moment we could have observed that it was.
+        #
+        # The epoch is a floor rather than a global gate: a memory written two
+        # years ago and never recalled has still only been *observed* since
+        # tracking started, so its window runs from there. That way a short
+        # window works from the day it is configured, instead of the whole rule
+        # sitting inert until the window has elapsed once.
+        observed_from = max(memory.created_at, epoch)
+        last_wanted = memory.last_recalled_at or observed_from
 
-        # A memory younger than the window has not had a fair chance to be
-        # recalled — it is new, not unwanted.
-        return memory.created_at <= cutoff
+        window = timedelta(days=config.decay_after_days)
+        return (now - last_wanted) >= window and (now - observed_from) >= window
 
     async def _pattern_evidence(self, scope: MemoryScope) -> set[str]:
         """Every memory an active pattern rests on.
