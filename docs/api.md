@@ -1,641 +1,1512 @@
-# API reference
+# REST API reference
 
-Base URL: `http://localhost:8000`. Interactive docs at `/docs`, OpenAPI schema
-at `/openapi.json`.
+Every MemDream capability over HTTP, usable from any language. Python users can
+use the [SDK](sdk.md), which wraps each endpoint below with the same arguments.
+
+New to MemDream? Read [Concepts](concepts.md) first.
 
 ---
 
-## Conventions
+## Contents
 
-**Everything is camelCase**, in both directions.
+- [Basics](#basics)
+- [Authentication](#authentication)
+- [Scope](#scope)
+- [Errors](#errors)
+- [Limits](#limits)
+- [Endpoint index](#endpoint-index)
+- **Memories** — [remember](#post-v1memories) · [search](#post-v1memoriessearch) · [list](#get-v1memories) · [get](#get-v1memoriesmemoryid) · [history](#get-v1memoriesmemoryidhistory) · [create](#post-v1memoriesmanual) · [edit](#patch-v1memoriesmemoryid) · [forget](#delete-v1memoriesmemoryid) · [erase user](#delete-v1memories)
+- **Audit** — [user log](#get-v1memoriesauditoperations) · [memory log](#get-v1memoriesmemoryidaudit)
+- **Dream** — [synthesize](#post-v1dreamsynthesize) · [job](#get-v1dreamjobsjobid) · [jobs](#get-v1dreamjobs) · [stats](#get-v1dreamstats) · [consolidate](#post-v1dreamconsolidate)
+- **Operations** — [health](#get-health) · [ready](#get-ready) · [metrics](#get-v1metrics) · [token usage](#get-v1metricstokens)
+- **Objects** — [memory](#memory) · [decision result](#decision-result) · [audit operation](#audit-operation) · [dream job](#dream-job)
 
-**Every memory endpoint is scoped.** This includes reads by id: a memory id is a
-random handle, not an authorisation token, so possessing one is not enough to
-read the record. A memory belonging to another tenant reports `404`, not `403` —
-indistinguishable from not existing.
+---
 
-**Only the user is required.** Identity arrives as `userId`, or as `phoneNumber`
-for MemDream to derive one from. Everything else is an optional partition
-dimension:
+## Basics
 
-| Field | | |
+| | |
+|---|---|
+| **Base URL** | wherever you run MemDream, e.g. `http://localhost:8000` — see [Self-hosting](self-hosting.md) |
+| **Format** | JSON in, JSON out. `Content-Type: application/json` on bodies |
+| **Field names** | `camelCase`, in both directions |
+| **Unknown fields** | rejected with `422`. A misspelt field fails loudly instead of being ignored |
+| **Timestamps** | ISO 8601. Responses are UTC, e.g. `2026-09-13T19:14:19.049000Z` |
+| **Request id** | send `X-Request-ID` to use your own; every response returns one in the `X-Request-ID` header |
+| **Interactive docs** | a running server serves `/docs` (Swagger UI), `/redoc` and `/openapi.json` |
+
+---
+
+## Authentication
+
+Send your key in the `X-API-Key` header:
+
+```bash
+curl https://memory.example.com/v1/memories/search \
+  -H "X-API-Key: sk_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123", "query": "dietary restrictions"}'
+```
+
+A deployment runs in one of three modes, chosen by its operator:
+
+| Mode | Configured by | Behaviour |
 |---|---|---|
-| `userId` \| `phoneNumber` | **required** | the isolation boundary |
-| `agentId` | optional | which agent or bot, when a deployment has several |
-| `clientId` | optional | the tenant, for platforms serving several customers |
-| `namespace` | optional | further dimensions: environment, region, workspace |
-| `botId` | optional | previous name for `agentId`, still accepted |
+| **Open** | no keys configured | no authentication. Only for a server on a private network behind your own gateway |
+| **Shared keys** | `DREAM_API_KEYS=key1,key2` | a valid key is required; `clientId` comes from the request |
+| **Bound keys** | `DREAM_API_KEY_CLIENTS=key1:acme,key2:globex`, or the `api_keys` collection | the key determines the tenant. `clientId` may be omitted; a request naming a different client is refused |
 
-A single-agent app sends `userId` and nothing else. Adding a dimension later
-creates a *new* partition rather than widening the old one, so introduce them
-before you have data, not after.
+**Use bound keys for any multi-tenant deployment.** With shared keys, any valid key
+can name any `clientId`. Set `DREAM_API_KEY_REQUIRE_BINDING=true` to refuse
+unbound keys entirely. Keys can be issued and revoked without a restart by
+inserting documents into the `api_keys` collection:
 
-`POST` bodies carry scope as fields; `GET` endpoints take them as query
-parameters.
+```json
+{ "_id": "key_acme_prod", "keyHash": "<sha256 hex of the key>", "clientId": "acme", "active": true }
+```
 
-**Authentication.** `DREAM_API_KEYS` (comma-separated) turns it on; send the key
-as `X-API-Key`. Empty means no authentication — appropriate behind a gateway on
-a private network, which is why it is opt-in rather than mandatory.
+Keys are compared as SHA-256 digests; the plaintext key is never stored.
+Revocations take effect within 60 seconds.
 
-For multi-tenant deployments use `DREAM_API_KEY_CLIENTS=key1:acme,key2:globex`
-instead. A **bound** key carries its tenant, so `clientId` comes from the
-credential rather than the request body, and a body naming a different client is
-refused with `401` rather than silently overridden. Without this, any valid key
-could name any `clientId` and read another customer's memories.
+```text
+401  {"error": {"code": "unauthorized", "message": "Missing X-API-Key header"}}
+401  {"error": {"code": "unauthorized", "message": "This API key is bound to a different client. Omit clientId, or send the one this key belongs to."}}
+```
 
-**Request ids.** Send `X-Request-ID` to correlate with your own logs, or read
-the one the service generates back from the response header.
+---
 
-### Errors
+## Scope
+
+Every memory endpoint runs inside a [scope](concepts.md#scope-whose-memory-is-it).
+
+| Field | Required | |
+|---|---|---|
+| `userId` | one of these two | your identifier for the user. ≤ 128 characters |
+| `phoneNumber` | | MemDream derives the user id from it. ≤ 32 characters |
+| `agentId` | no | which agent or bot. ≤ 128 characters |
+| `clientId` | no | the tenant. ≤ 128 characters. With a bound key, taken from the key |
+| `namespace` | no | an object of string values, e.g. `{"env": "prod"}` |
+| `botId` | no | previous name for `agentId`, still accepted |
+
+**Where scope goes:**
+
+- `POST` and `PATCH` — as fields in the JSON body.
+- `GET` and `DELETE` — as query parameters. `namespace` is sent as JSON:
+  `?userId=user_123&namespace={"env":"prod"}` (URL-encoded in practice). A value
+  that is not a JSON object of strings is rejected with `422`.
+
+A memory outside the requesting scope returns `404`, exactly as if it did not
+exist.
+
+---
+
+## Errors
+
+Every error has the same shape:
 
 ```json
 {
   "error": {
     "code": "not_found",
-    "message": "Memory mem_abc not found",
+    "message": "Memory mem_doesnotexist not found",
     "details": {}
   }
 }
 ```
 
+`code` is stable — branch on it rather than on `message`. `details` is present
+when there is something useful to add.
+
 | Status | `code` | Meaning |
 |---|---|---|
-| 401 | `unauthorized` | missing or invalid `X-API-Key` |
-| 403 | `tenant_isolation_violation` | a scope check failed internally; should never surface |
-| 404 | `not_found`, `job_not_found` | absent, or outside the requesting scope |
-| 409 | `invalid_state_transition` | e.g. merging a memory into itself |
-| 422 | `validation_error` | request body failed validation |
-| 500 | `internal_error` | unexpected; the response carries `requestId` |
-| 502 | `provider_error`, `llm_response_error` | an upstream provider failed |
+| 401 | `unauthorized` | missing or invalid API key, or a bound key used with a different `clientId` |
+| 403 | `tenant_isolation_violation` | an internal scope check failed. Should never occur; report it |
+| 404 | `not_found` | the memory does not exist in this scope |
+| 404 | `job_not_found` | the job does not exist in this scope |
+| 409 | `invalid_state_transition` | the operation is not allowed in the memory's state — e.g. editing a `superseded` memory |
+| 422 | `validation_error` | the request failed validation |
+| 500 | `internal_error` | unexpected. `details.requestId` identifies the request in the server's logs |
+| 500 | `configuration_error` | the server is misconfigured |
+| 502 | `provider_error` | the LLM, embedding provider or vector store failed |
+| 502 | `llm_response_error` | the model returned output that did not match the required schema |
+| 503 | — | from [`GET /ready`](#get-ready) only: a required dependency is down |
 
----
-
-## POST /v1/memories
-
-Extract durable memories from a message and let Dream decide what to do with
-each one.
+Validation errors list every problem:
 
 ```json
 {
-  "prompt": "I moved from Chennai to Bangalore last month.",
-  "phoneNumber": "+919999999999",
-  "botId": "bot_123",
-  "clientId": "client_456"
+  "error": {
+    "code": "validation_error",
+    "message": "Request failed validation",
+    "details": {
+      "errors": [
+        {
+          "loc": ["body"],
+          "message": "Value error, Either userId or phoneNumber must be provided",
+          "type": "value_error"
+        }
+      ]
+    }
+  }
 }
 ```
 
-| Field | Type | Notes |
-|---|---|---|
-| `prompt` | string | required, ≤ 20 000 chars |
-| `clientId` `botId` | string | required |
-| `phoneNumber` | string | required unless `userId` is given |
-| `userId` | string | supply instead of `phoneNumber` if you have your own identifier |
-| `messageId` | string | recorded as provenance |
-| `timestamp` | ISO-8601 | when the message was sent; anchors "last month" during extraction |
-| `metadata` | object | stored on any memory this creates |
-| `raw` | bool | store the prompt verbatim as one memory, skipping extraction but keeping deduplication and consolidation |
+---
 
-**Response**
+## Limits
+
+| Field | Limit |
+|---|---|
+| `prompt` | 1–20,000 characters |
+| `query` | 1–8,000 characters |
+| memory `content` | 1–4,000 characters |
+| `memoryType` | ≤ 64 characters |
+| `importance`, `confidence`, `minScore`, `decayImportanceFloor` | 0–1 |
+| search `limit` | 1–100, default 10 |
+| list and audit `limit` | 1–200, default 50 |
+| jobs `limit` | 1–100, default 20 |
+| `minMemories`, `compactMinMemories` | 2–1,000 |
+| `decayAfterDays` | 1–3,650 |
+
+MemDream does not rate-limit requests itself; apply limits at your gateway.
+
+---
+
+## Endpoint index
+
+| Method | Path | |
+|---|---|---|
+| `POST` | [`/v1/memories`](#post-v1memories) | remember a message |
+| `POST` | [`/v1/memories/search`](#post-v1memoriessearch) | search memories |
+| `GET` | [`/v1/memories`](#get-v1memories) | list memories |
+| `GET` | [`/v1/memories/{memoryId}`](#get-v1memoriesmemoryid) | get one memory with its relationships |
+| `GET` | [`/v1/memories/{memoryId}/history`](#get-v1memoriesmemoryidhistory) | follow a memory's supersede chain |
+| `POST` | [`/v1/memories/manual`](#post-v1memoriesmanual) | store a memory verbatim |
+| `PATCH` | [`/v1/memories/{memoryId}`](#patch-v1memoriesmemoryid) | correct a memory |
+| `DELETE` | [`/v1/memories/{memoryId}`](#delete-v1memoriesmemoryid) | forget or erase one memory |
+| `DELETE` | [`/v1/memories`](#delete-v1memories) | erase everything for a user |
+| `GET` | [`/v1/memories/audit/operations`](#get-v1memoriesauditoperations) | every decision for a user |
+| `GET` | [`/v1/memories/{memoryId}/audit`](#get-v1memoriesmemoryidaudit) | every decision that touched a memory |
+| `POST` | [`/v1/dream/synthesize`](#post-v1dreamsynthesize) | find patterns |
+| `GET` | [`/v1/dream/jobs/{jobId}`](#get-v1dreamjobsjobid) | a synthesis job |
+| `GET` | [`/v1/dream/jobs`](#get-v1dreamjobs) | a user's synthesis jobs |
+| `GET` | [`/v1/dream/stats`](#get-v1dreamstats) | counts, decisions and cost for a user |
+| `POST` | [`/v1/dream/consolidate`](#post-v1dreamconsolidate) | retire memories that no longer matter |
+| `GET` | [`/health`](#get-health) | liveness |
+| `GET` | [`/ready`](#get-ready) | readiness |
+| `GET` | [`/v1/metrics`](#get-v1metrics) | counters and latencies |
+| `GET` | [`/v1/metrics/tokens`](#get-v1metricstokens) | token spend by operation |
+
+---
+
+# Memories
+
+## POST /v1/memories
+
+**Remember a message.** MemDream extracts the durable facts in it and decides, for
+each, whether to add, supersede, merge or ignore it. See
+[what happens when you remember](concepts.md#what-happens-when-you-remember).
+
+### Request body
+
+| Field | Type | Default | |
+|---|---|---|---|
+| *scope* | | | [scope fields](#scope) |
+| `prompt` | string | **required** | the user's message |
+| `messageId` | string | — | your id for the message, stored on memories as `sourceMessageIds` |
+| `timestamp` | datetime | now | when the message was sent. Anchors *"last month"*, *"tomorrow"* |
+| `metadata` | object | `{}` | stored on the resulting memories, returned untouched |
+| `raw` | boolean | `false` | store `prompt` verbatim as one memory instead of extracting facts from it. The add / supersede / merge decision still runs |
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/v1/memories \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "prompt": "I'\''m allergic to peanuts and I always order the veg thali for lunch.",
+    "messageId": "msg_0042",
+    "metadata": {"channel": "whatsapp"}
+  }'
+```
+
+```json
+{
+  "action": "ADD",
+  "memoryId": "mem_11e64aec00a04cbb832a3a0f",
+  "supersededMemoryIds": [],
+  "mergedMemoryIds": [],
+  "results": [
+    {
+      "action": "ADD",
+      "memoryId": "mem_11e64aec00a04cbb832a3a0f",
+      "content": "User is allergic to peanuts.",
+      "reason": "User is allergic to peanuts.",
+      "supersededMemoryIds": [],
+      "mergedMemoryIds": [],
+      "operationId": "op_c6d9e17b93894104b9d214e0"
+    },
+    {
+      "action": "ADD",
+      "memoryId": "mem_325cffcbbaa849cf93961a20",
+      "content": "User always orders the veg thali for lunch.",
+      "reason": "no related memory exists for this user",
+      "supersededMemoryIds": [],
+      "mergedMemoryIds": [],
+      "operationId": "op_c3b9919987aa462e88d06548"
+    }
+  ],
+  "extractedCount": 2,
+  "requestId": "req_389aba4c69014a5b94e07a5f"
+}
+```
+
+When a new fact contradicts an old one — here, *"I live in Bangalore now."*:
 
 ```json
 {
   "action": "SUPERSEDE",
-  "memoryId": "mem_a1b2c3",
-  "supersededMemoryIds": ["mem_x9y8z7"],
+  "memoryId": "mem_7c41d2a09b8e4f3a9d6b1e20",
+  "supersededMemoryIds": ["mem_002e9cd0a9d94445bb4edad2"],
   "mergedMemoryIds": [],
   "results": [
     {
       "action": "SUPERSEDE",
-      "memoryId": "mem_a1b2c3",
+      "memoryId": "mem_7c41d2a09b8e4f3a9d6b1e20",
       "content": "User lives in Bangalore.",
-      "reason": "new city Bangalore contradicts stored city Chennai",
-      "supersededMemoryIds": ["mem_x9y8z7"],
+      "reason": "User's address changed from Chennai to Bangalore.",
+      "supersededMemoryIds": ["mem_002e9cd0a9d94445bb4edad2"],
       "mergedMemoryIds": [],
-      "operationId": "op_44d1"
+      "operationId": "op_5b0e8c1d7f2a4c6e9b3d1a70"
     }
   ],
   "extractedCount": 1,
-  "requestId": "req_7f3a"
+  "requestId": "req_841696fd4e2e4e15a201e829"
 }
 ```
 
-One message can hold several facts, so **`results` is the complete answer**. The
-top-level `action` / `memoryId` / `supersededMemoryIds` mirror the most
-significant result — a consolidation outranks an addition — which keeps the
-single-fact case, by far the most common, as simple as it looks.
+Small talk — here, *"hey thanks!"* — is filtered before any model call and costs nothing:
 
-`action: "NOOP"` with `extractedCount: 0` means nothing durable was found. That
-is a normal outcome for greetings and questions, not an error. `GET
-/v1/memories/audit/operations` records why.
+```json
+{
+  "action": "NOOP",
+  "memoryId": null,
+  "supersededMemoryIds": [],
+  "mergedMemoryIds": [],
+  "results": [],
+  "extractedCount": 0,
+  "requestId": "req_01fd7b6a04ac427dba88bba7"
+}
+```
+
+### Response
+
+| Field | |
+|---|---|
+| `action` | `ADD`, `SUPERSEDE`, `MERGE` or `NOOP` — the most significant decision. A consolidation outranks an addition |
+| `memoryId` | the memory that decision produced; `null` for `NOOP` |
+| `supersededMemoryIds` `mergedMemoryIds` | what that decision replaced or absorbed |
+| `results` | one [decision result](#decision-result) per extracted fact. Empty when nothing was extracted |
+| `extractedCount` | facts found in the message |
+| `requestId` | this request's id |
+
+A `NOOP` with empty `results` means nothing worth keeping was found. The reason is
+in the [audit log](#get-v1memoriesauditoperations).
+
+Remembering can trigger [synthesis](#post-v1dreamsynthesize) in the background once
+a user has accumulated enough new memories. It never delays or fails this response.
+
+**SDK:** [`add()`](sdk.md#add)
 
 ---
 
 ## POST /v1/memories/search
 
-```json
-{
-  "query": "Where does the user currently live?",
-  "phoneNumber": "+919999999999",
-  "botId": "bot_123",
-  "clientId": "client_456",
-  "limit": 10,
-  "latestOnly": true
-}
+**Search a user's memories**, [hybrid-ranked](concepts.md#how-recall-ranks-memories)
+by meaning, importance, confidence, recency and status.
+
+### Request body
+
+| Field | Type | Default | |
+|---|---|---|---|
+| *scope* | | | [scope fields](#scope) |
+| `query` | string | **required** | |
+| `limit` | integer | `10` | 1–100 |
+| `latestOnly` | boolean | `false` | only `active` memories — "what is true now?". Overrides the `include*` flags |
+| `includeSuperseded` | boolean | `true` | include replaced facts, ranked below current ones |
+| `includeMerged` | boolean | `false` | include memories absorbed into another |
+| `includeExpired` | boolean | `false` | include retired memories |
+| `memoryTypes` | string[] | all | e.g. `["preference", "constraint"]` |
+| `minScore` | number | — | 0–1. Drop weaker matches |
+| `asOf` | datetime | — | only memories whose validity window contains this instant — "what was true then?" |
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/v1/memories/search \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123", "query": "where does the user live?", "limit": 5}'
 ```
-
-| Field | Default | Notes |
-|---|---|---|
-| `query` | required | |
-| `limit` | 10 | 1–100 |
-| `latestOnly` | `false` | active only — "what is true now?". Overrides the `include*` flags |
-| `includeSuperseded` | `true` | history, ranked below current facts |
-| `includeMerged` | `false` | usually redundant: merged content lives in the canonical memory |
-| `includeExpired` | `false` | |
-| `memoryTypes` | all | open vocabulary |
-| `minScore` | none | 0–1, on the final hybrid score |
-| `asOf` | none | point-in-time: only memories whose validity window contains this instant |
-
-**Response**
 
 ```json
 {
   "memories": [
     {
-      "memoryId": "mem_a1b2c3",
-      "content": "User lives in Bangalore.",
-      "memoryType": "profile",
+      "memoryId": "mem_002e9cd0a9d94445bb4edad2",
+      "userId": "user_123",
+      "content": "User lives in Chennai.",
+      "memoryType": "fact",
       "status": "active",
-      "importance": 0.75,
-      "confidence": 0.95,
-      "createdAt": "2026-08-13T10:00:00Z",
-      "validFrom": "2026-07-01T00:00:00Z",
+      "importance": 0.8,
+      "confidence": 0.9,
+      "explicit": true,
+      "temporalNature": "current",
+      "createdAt": "2026-09-13T19:14:19.049000Z",
+      "validFrom": "2026-09-13T00:00:00Z",
       "validUntil": null,
-      "supersededBy": null,
-      "sourceMemoryIds": ["mem_x9y8z7"],
-      "score": 0.8123,
+      "lastRecalledAt": null,
+      "recallCount": 0,
+      "metadata": {},
+      "score": 0.703343,
       "scoreBreakdown": {
-        "semanticSimilarity": 0.71,
-        "importance": 0.75,
-        "confidence": 0.95,
-        "recency": 0.99,
+        "semanticSimilarity": 0.572239,
+        "importance": 0.8,
+        "confidence": 0.9,
+        "recency": 1.0,
+        "status": 1.0
+      }
+    },
+    {
+      "memoryId": "mem_11e64aec00a04cbb832a3a0f",
+      "userId": "user_123",
+      "content": "User is allergic to peanuts.",
+      "memoryType": "fact",
+      "status": "active",
+      "importance": 0.8,
+      "confidence": 0.9,
+      "explicit": true,
+      "temporalNature": "permanent",
+      "createdAt": "2026-09-13T19:14:22.109000Z",
+      "validFrom": "2026-09-13T19:14:22.109000Z",
+      "validUntil": null,
+      "lastRecalledAt": null,
+      "recallCount": 0,
+      "metadata": {"channel": "whatsapp"},
+      "score": 0.540514,
+      "scoreBreakdown": {
+        "semanticSimilarity": 0.300857,
+        "importance": 0.8,
+        "confidence": 0.9,
+        "recency": 1.0,
         "status": 1.0
       }
     }
   ],
-  "count": 1,
-  "requestId": "req_7f3a"
-}
-```
-
-Ranking blends similarity with importance, confidence, recency and status — not
-top-k cosine. `scoreBreakdown` is there so a ranking can be explained rather
-than guessed at; weights are configurable under `retrieval.weights`.
-
-Embeddings are never returned.
-
----
-
-## The manual endpoints
-
-`POST /v1/memories` is the conversational path: it decides *what* is worth
-remembering. The four endpoints below are the deliberate path — importing known
-facts, correcting a bad extraction, honouring "forget that", answering an
-erasure request. They skip extraction and Dream reasoning entirely, because you
-have already said exactly what you want.
-
-All four still write an audit row. A human editing memory by hand is more worth
-recording than a routine automated decision, not less.
-
----
-
-## POST /v1/memories/manual
-
-Write a memory verbatim. Returns `201`.
-
-```json
-{
-  "content": "User is allergic to peanuts.",
-  "memoryType": "constraint",
-  "importance": 0.9,
-  "userId": "user_123"
-}
-```
-
-| Field | Type | Notes |
-|---|---|---|
-| `content` | string | required, ≤ 4000 chars |
-| `memoryType` | string | default `other`. Open vocabulary |
-| `importance` | 0–1 | default `0.6` |
-| `confidence` | 0–1 | default `1.0` — you asserted it, so nothing was inferred |
-| `explicit` | bool | default `true`. `false` marks it as inferred rather than stated |
-| `temporalNature` | string | default `current`. `permanent` protects it from supersede |
-| `validFrom` `validUntil` | ISO-8601 | when the fact is true. `validFrom` defaults to now |
-| `metadata` | object | stored on the memory |
-| `allowDuplicate` | bool | default `false` |
-
-Write content **in the third person** (`"User is allergic to peanuts."`),
-matching what the extractor produces, so retrieval treats it the same way.
-
-An identical active memory is returned as-is rather than duplicated, so a
-re-run importer converges instead of multiplying. `allowDuplicate: true` forces
-a second row.
-
-Everything written here carries `metadata.source: "manual"`, so it stays
-distinguishable from anything the engine decided.
-
-**Response** — the same shape as `GET /v1/memories/{memoryId}`.
-
----
-
-## PATCH /v1/memories/{memoryId}
-
-Correct an active memory in place. Only the fields you send change.
-
-```json
-{
-  "content": "User is allergic to peanuts and shellfish.",
-  "importance": 0.95,
-  "userId": "user_123"
-}
-```
-
-Accepts any subset of `content`, `memoryType`, `importance`, `confidence`,
-`explicit`, `temporalNature`, `validFrom`, `validUntil`, `metadata`. Sending
-none of them is `422` — an update that changes nothing is a mistake worth
-reporting rather than a no-op worth accepting.
-
-The memory **keeps its id**, so anything referencing it stays valid. Changing
-`content` re-embeds it in the same call, because an index that disagrees with
-the text it points at is worse than a stale one.
-
-`metadata` is **merged**, not replaced: send only the keys you want to change.
-Every edit stamps `metadata.lastManualEdit`, so a hand-corrected memory is
-identifiable long after the audit row has scrolled away.
-
-An unrecognised `temporalNature` is ignored rather than rejected, so a typo
-leaves the rest of the update applied.
-
-Editing is deliberately *not* a supersede. An operator fixing a bad extraction
-is correcting a record; a supersede chain would claim the user's situation
-changed, which would put a falsehood into the history. If the world changed
-rather than the record being wrong, `POST /v1/memories` and let Dream supersede
-it properly.
-
-Only `active` memories can be edited — superseded and merged rows are history,
-and history is not rewritten (`409`).
-
-**Response** — the same shape as `GET /v1/memories/{memoryId}`.
-
----
-
-## DELETE /v1/memories/{memoryId}
-
-Query: scope, plus `permanent` (default `false`).
-
-Two verbs behind one URL, because "stop using this" and "destroy this" carry
-very different risk, and merging them is how data gets lost by accident.
-
-| | |
-|---|---|
-| `permanent=false` *(default)* | the memory moves to `expired` and leaves the search index. It stops influencing answers but stays readable and auditable. **This is what "forget that" should do.** |
-| `permanent=true` | the row and every edge touching it are erased. Irreversible. Reserve it for data that must not exist — a wrongly captured secret, or an erasure request |
-
-```json
-{ "memoryId": "mem_a1b2c3", "result": "expired", "permanent": false }
-```
-
-`result` is `expired` or `deleted`. A memory outside the requesting scope is
-`404`, indistinguishable from one that does not exist.
-
----
-
-## DELETE /v1/memories
-
-Erase **everything** for one user: memories, relationships, audit trail and
-jobs. Requires `?confirm=ERASE`.
-
-```
-DELETE /v1/memories?userId=user_123&confirm=ERASE
-```
-
-```json
-{
-  "deletedMemories": 42,
-  "deletedRelations": 15,
-  "deletedOperations": 88,
-  "deletedJobs": 3
-}
-```
-
-This is the right-to-erasure path, so the audit trail goes too: retaining "we
-decided to store X about this user" after deleting X would defeat the point of
-the request. Nothing is recorded about the purge itself, for the same reason.
-
-The `confirm=ERASE` guard exists because a destructive collection-level
-operation should not be reachable by getting a URL slightly wrong. Without it
-the request is `422`.
-
----
-
-## GET /v1/memories/{memoryId}
-
-Query: `clientId`, `botId`, `phoneNumber` | `userId`.
-
-```json
-{
-  "memory": { "...": "as above" },
-  "relationships": [
-    {
-      "memoryId": "mem_x9y8z7",
-      "relationType": "supersedes",
-      "content": "User lives in Chennai.",
-      "status": "superseded",
-      "memoryType": "profile"
-    }
-  ],
-  "sourceMemories": [],
-  "derivedMemories": [
-    {
-      "memoryId": "pat_5f2a",
-      "relationType": "supports",
-      "content": "User has relocated within India twice in two years.",
-      "status": "active",
-      "memoryType": "pattern"
-    }
-  ],
-  "supersededBy": null,
-  "mergedInto": null
-}
-```
-
-- `relationships` — outgoing edges (`supersedes`, `merged_from`, `derived_from`)
-- `sourceMemories` — what this memory was built from
-- `derivedMemories` — what rests on it, chiefly synthesised patterns
-
----
-
-## GET /v1/memories/{memoryId}/history
-
-Walks `supersedes` edges back to the original fact, newest first. Answers "when
-did this change, and what did it say before?" — the reason superseded memories
-are retained rather than deleted.
-
-```json
-{
-  "memories": [
-    { "memoryId": "mem_a1b2c3", "content": "User lives in Bangalore.", "status": "active",     "validFrom": "2026-07-01T00:00:00Z", "validUntil": null },
-    { "memoryId": "mem_x9y8z7", "content": "User lives in Chennai.",   "status": "superseded", "validFrom": "2024-01-01T00:00:00Z", "validUntil": "2026-07-01T00:00:00Z" }
-  ],
   "count": 2,
-  "total": 2
+  "requestId": "req_b41d8f3bfec64e539295c18a"
 }
 ```
+
+Memory objects in examples on this page are abbreviated; responses contain every
+[memory field](#memory).
+
+### Response
+
+| Field | |
+|---|---|
+| `memories` | [memories](#memory), best first, each with `score` (0–1) and `scoreBreakdown` |
+| `count` | number of results |
+| `requestId` | |
+
+`scoreBreakdown` holds the raw value of each ranking signal; `score` is their
+weighted sum. Search only returns memories that clear a minimum similarity, so an
+unrelated query returns an empty list.
+
+Each search records which memories it returned, updating `lastRecalledAt` and
+`recallCount`. That is the signal [consolidation](#post-v1dreamconsolidate) uses
+to decide what is still useful. It does not change `updatedAt`.
+
+**SDK:** [`search()`](sdk.md#search)
 
 ---
 
 ## GET /v1/memories
 
-Browse without a semantic query. Defaults to active only.
+**List a user's memories** without a query, newest first.
 
-Query: scope, plus `status` (repeatable), `memoryType` (repeatable),
-`limit` (≤ 200), `offset`.
+### Query parameters
 
+| Parameter | Default | |
+|---|---|---|
+| *scope* | | [scope parameters](#scope) |
+| `status` | `active` | repeat to include several: `status=active&status=superseded`. Values: `active`, `superseded`, `merged`, `expired` |
+| `memoryType` | all | repeat to include several |
+| `limit` | `50` | 1–200 |
+| `offset` | `0` | |
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/memories?userId=user_123&status=active&status=superseded&limit=20"
 ```
-GET /v1/memories?clientId=c&botId=b&phoneNumber=%2B91...&status=active&status=superseded&limit=50
+
+```json
+{
+  "memories": [
+    {
+      "memoryId": "mem_325cffcbbaa849cf93961a20",
+      "content": "User always orders the veg thali for lunch.",
+      "memoryType": "preference",
+      "status": "active",
+      "importance": 0.5,
+      "confidence": 0.9,
+      "sourceMessageIds": ["msg_0042"],
+      "metadata": {"channel": "whatsapp"}
+    },
+    {
+      "memoryId": "mem_002e9cd0a9d94445bb4edad2",
+      "content": "User lives in Chennai.",
+      "memoryType": "fact",
+      "status": "superseded",
+      "importance": 0.8,
+      "confidence": 0.9,
+      "supersededBy": "mem_7c41d2a09b8e4f3a9d6b1e20",
+      "metadata": {}
+    }
+  ],
+  "count": 2,
+  "total": 2,
+  "offset": 0
+}
 ```
+
+### Response
+
+| Field | |
+|---|---|
+| `memories` | [memories](#memory) |
+| `count` | memories in this page |
+| `total` | memories matching the filters, across all pages |
+| `offset` | the offset used |
+
+**SDK:** [`list()`](sdk.md#list)
 
 ---
 
-## GET /v1/memories/{memoryId}/audit
+## GET /v1/memories/{memoryId}
+
+**Get one memory** with its relationships: what it replaced, what it was built
+from, and what has been built on it.
+
+### Query parameters
+
+[Scope parameters](#scope).
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/memories/mem_7c41d2a09b8e4f3a9d6b1e20?userId=user_123"
+```
+
+```json
+{
+  "memory": {
+    "memoryId": "mem_7c41d2a09b8e4f3a9d6b1e20",
+    "userId": "user_123",
+    "content": "User lives in Bangalore.",
+    "memoryType": "fact",
+    "status": "active",
+    "importance": 0.8,
+    "confidence": 0.9,
+    "temporalNature": "current",
+    "supersededBy": null,
+    "mergedInto": null,
+    "sourceMemoryIds": [],
+    "metadata": {}
+  },
+  "relationships": [
+    {
+      "memoryId": "mem_002e9cd0a9d94445bb4edad2",
+      "relationType": "supersedes",
+      "content": "User lives in Chennai.",
+      "status": "superseded",
+      "memoryType": "fact"
+    }
+  ],
+  "sourceMemories": [],
+  "derivedMemories": [],
+  "supersededBy": null,
+  "mergedInto": null
+}
+```
+
+### Response
+
+| Field | |
+|---|---|
+| `memory` | the [memory](#memory) |
+| `relationships` | related memories, each with `memoryId`, `relationType`, `content`, `status`, `memoryType`. Relation types: `supersedes`, `superseded_by`, `merged_into`, `merged_from`, `derived_from`, `supports` |
+| `sourceMemories` | for a pattern or summary: the memories it was built from |
+| `derivedMemories` | patterns built on this memory |
+| `supersededBy` `mergedInto` | the memory that replaced or absorbed this one |
+
+`404 not_found` if the memory does not exist in this scope.
+
+**SDK:** [`get()`](sdk.md#get)
+
+---
+
+## GET /v1/memories/{memoryId}/history
+
+**Follow a memory's supersede chain** back to the original fact, newest first.
+Answers *"when did this change, and what did it say before?"*
+
+### Query parameters
+
+[Scope parameters](#scope).
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/memories/mem_7c41d2a09b8e4f3a9d6b1e20/history?userId=user_123"
+```
+
+```json
+{
+  "memories": [
+    {
+      "memoryId": "mem_7c41d2a09b8e4f3a9d6b1e20",
+      "content": "User lives in Bangalore.",
+      "status": "active",
+      "createdAt": "2026-09-13T19:20:05.412000Z",
+      "supersededBy": null
+    },
+    {
+      "memoryId": "mem_002e9cd0a9d94445bb4edad2",
+      "content": "User lives in Chennai.",
+      "status": "superseded",
+      "createdAt": "2026-09-13T19:14:19.049000Z",
+      "supersededBy": "mem_7c41d2a09b8e4f3a9d6b1e20"
+    }
+  ],
+  "count": 2,
+  "total": 2,
+  "offset": 0
+}
+```
+
+A memory that never replaced anything returns a chain of one. `404 not_found` if
+the memory does not exist in this scope.
+
+**SDK:** [`history()`](sdk.md#history)
+
+---
+
+## POST /v1/memories/manual
+
+**Store a memory exactly as written.** No extraction, no decision, no model call.
+For importing facts you already know — a CRM profile, a signup form — or storing
+something extraction would not keep.
+
+### Request body
+
+| Field | Type | Default | |
+|---|---|---|---|
+| *scope* | | | [scope fields](#scope) |
+| `content` | string | **required** | write it in the third person, as extraction does: `"User is allergic to peanuts."` |
+| `memoryType` | string | `"other"` | see [memory types](#memory) |
+| `importance` | number | `0.6` | 0–1 |
+| `confidence` | number | `1.0` | 0–1 |
+| `explicit` | boolean | `true` | `false` marks it as inferred |
+| `temporalNature` | string | `"current"` | `permanent`, `current`, `temporary`, `historical`, `future` |
+| `validFrom` `validUntil` | datetime | — | when the fact is true. Consolidation retires it once `validUntil` passes |
+| `metadata` | object | `{}` | |
+| `allowDuplicate` | boolean | `false` | by default an identical active memory is returned instead of creating a second |
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/v1/memories/manual \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user_123",
+    "content": "User'\''s phone number ends in 4821.",
+    "memoryType": "profile",
+    "importance": 0.8
+  }'
+```
+
+Status `201`:
+
+```json
+{
+  "memory": {
+    "memoryId": "mem_9eff9c243db54ffda6c75295",
+    "userId": "user_123",
+    "content": "User's phone number ends in 4821.",
+    "memoryType": "profile",
+    "status": "active",
+    "importance": 0.8,
+    "confidence": 1.0,
+    "explicit": true,
+    "temporalNature": "current",
+    "createdAt": "2026-09-13T19:14:24.766000Z",
+    "validFrom": "2026-09-13T19:14:24.766000Z",
+    "validUntil": null,
+    "metadata": {"source": "manual"}
+  },
+  "relationships": [],
+  "sourceMemories": [],
+  "derivedMemories": [],
+  "supersededBy": null,
+  "mergedInto": null
+}
+```
+
+Returns the same shape as [`GET /v1/memories/{memoryId}`](#get-v1memoriesmemoryid).
+`metadata.source` is set to `"manual"`.
+
+**SDK:** [`create()`](sdk.md#create)
+
+---
+
+## PATCH /v1/memories/{memoryId}
+
+**Correct a memory in place.** Only the fields you send change, and the memory
+keeps its id.
+
+Use this to fix a record — a mis-extracted value, a wrong importance. When the
+user's situation actually changes, send the new fact to
+[`POST /v1/memories`](#post-v1memories) instead, so the old one is kept as
+history.
+
+### Request body
+
+[Scope fields](#scope), plus at least one of: `content`, `memoryType`,
+`importance`, `confidence`, `explicit`, `temporalNature`, `validFrom`,
+`validUntil`, `metadata`. `metadata` is merged into the existing metadata.
+
+### Example
+
+```bash
+curl -X PATCH http://localhost:8000/v1/memories/mem_9eff9c243db54ffda6c75295 \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123", "importance": 0.9, "metadata": {"verified": true}}'
+```
+
+```json
+{
+  "memory": {
+    "memoryId": "mem_9eff9c243db54ffda6c75295",
+    "content": "User's phone number ends in 4821.",
+    "memoryType": "profile",
+    "status": "active",
+    "importance": 0.9,
+    "createdAt": "2026-09-13T19:14:24.766000Z",
+    "updatedAt": "2026-09-13T19:14:24.770000Z",
+    "metadata": {
+      "source": "manual",
+      "verified": true,
+      "lastManualEdit": "2026-09-13T19:14:24.770000+00:00"
+    }
+  },
+  "relationships": [],
+  "sourceMemories": [],
+  "derivedMemories": [],
+  "supersededBy": null,
+  "mergedInto": null
+}
+```
+
+### Errors
+
+| Status | |
+|---|---|
+| `404 not_found` | not in this scope |
+| `409 invalid_state_transition` | the memory is `superseded` or `merged`. History is never rewritten |
+| `422 validation_error` | no fields to change, or an invalid value |
+
+**SDK:** [`update()`](sdk.md#update)
+
+---
+
+## DELETE /v1/memories/{memoryId}
+
+**Forget a memory, or erase it.**
+
+### Query parameters
+
+| Parameter | Default | |
+|---|---|---|
+| *scope* | | [scope parameters](#scope) |
+| `permanent` | `false` | `true` deletes the row and its relationships. Irreversible |
+
+By default the memory moves to `expired`: it stops appearing in search but stays
+auditable. This is what *"forget that"* should do. Reserve `permanent=true` for
+data that must not exist, such as a wrongly captured secret.
+
+### Example
+
+```bash
+curl -X DELETE "http://localhost:8000/v1/memories/mem_9eff9c243db54ffda6c75295?userId=user_123"
+```
+
+```json
+{
+  "memoryId": "mem_9eff9c243db54ffda6c75295",
+  "result": "expired",
+  "permanent": false,
+  "operationId": null
+}
+```
+
+With `permanent=true`, `result` is `"deleted"` and `permanent` is `true`.
+`404 not_found` if the memory does not exist in this scope.
+
+**SDK:** [`forget()`](sdk.md#forget)
+
+---
+
+## DELETE /v1/memories
+
+**Erase everything for one user**: memories, relationships, audit trail and Dream
+jobs. Irreversible. Intended for erasure requests — the audit trail goes too,
+because keeping *"we decided to store X"* after deleting X would defeat the
+request.
+
+### Query parameters
+
+| Parameter | |
+|---|---|
+| *scope* | [scope parameters](#scope) |
+| `confirm` | **required**, must be exactly `ERASE` |
+
+### Example
+
+```bash
+curl -X DELETE "http://localhost:8000/v1/memories?userId=user_123&confirm=ERASE"
+```
+
+```json
+{
+  "deletedMemories": 5,
+  "deletedRelations": 0,
+  "deletedOperations": 9,
+  "deletedJobs": 1,
+  "operationId": null
+}
+```
+
+Without `confirm=ERASE`:
+
+```json
+{
+  "error": {
+    "code": "validation_error",
+    "message": "Erasing a user's entire memory requires ?confirm=ERASE",
+    "details": {"userId": "user_123"}
+  }
+}
+```
+
+Only the requested scope is erased: `userId=user_123` with no `agentId` does not
+touch `user_123`'s memories under an agent.
+
+**SDK:** [`purge()`](sdk.md#purge)
+
+---
+
+# Audit
+
+Every decision MemDream makes is recorded — `NOOP`s included — with the input,
+the reason, the memories the model was shown and the tokens it used. It answers
+*"why was this remembered?"* and *"why wasn't it?"*.
+
 ## GET /v1/memories/audit/operations
 
-Every Dream decision, newest first. **`NOOP`s are included, and are usually what
-you want** — "why was nothing remembered?" is answered here rather than by
-reading logs.
+**Every decision for a user**, newest first.
 
-Query on the collection endpoint: scope, `action` (repeatable), `limit`,
-`offset`.
+### Query parameters
+
+| Parameter | Default | |
+|---|---|---|
+| *scope* | | [scope parameters](#scope) |
+| `action` | all | repeat to include several: `action=NOOP&action=SUPERSEDE` |
+| `limit` | `50` | 1–200 |
+| `offset` | `0` | |
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/memories/audit/operations?userId=user_123&action=NOOP&limit=2"
+```
 
 ```json
 {
   "operations": [
     {
-      "operationId": "op_44d1",
-      "action": "SUPERSEDE",
-      "memoryId": "mem_a1b2c3",
-      "targetMemoryIds": ["mem_x9y8z7"],
-      "reason": "new city Bangalore contradicts stored city Chennai",
-      "inputContent": "I moved from Chennai to Bangalore last month.",
-      "candidateMemoryIds": ["mem_x9y8z7", "mem_qq11"],
-      "model": "azure-openai:gpt-4o-mini",
-      "provider": "azure_openai",
-      "confidence": 0.95,
+      "operationId": "op_9405b0eb19874f459f26e0bf",
+      "userId": "user_123",
+      "agentId": null,
+      "clientId": null,
+      "namespace": {},
+      "scopeKey": "9dc7ad5b46771f7e11d973ecee453a23",
+      "action": "NOOP",
+      "memoryId": null,
+      "targetMemoryIds": [],
+      "reason": "greeting or acknowledgement",
+      "inputContent": "hey thanks!",
+      "candidateMemoryIds": [],
+      "model": null,
+      "provider": "triage",
+      "confidence": null,
+      "requestId": "req_01fd7b6a04ac427dba88bba7",
+      "jobId": null,
+      "latencyMs": 0.0,
+      "tokenUsage": {},
       "validationNotes": [],
-      "requestId": "req_7f3a",
-      "timestamp": "2026-08-13T10:00:00Z"
+      "timestamp": "2026-09-13T19:14:23.101000Z"
+    },
+    {
+      "operationId": "op_dbf9d05e6f2b45389db84b04",
+      "userId": "user_123",
+      "agentId": null,
+      "clientId": null,
+      "namespace": {},
+      "scopeKey": "9dc7ad5b46771f7e11d973ecee453a23",
+      "action": "NOOP",
+      "memoryId": null,
+      "targetMemoryIds": [],
+      "reason": "No relevant user information to extract.",
+      "inputContent": "What time do you close?",
+      "candidateMemoryIds": [],
+      "model": "azure_openai:gpt-4o-mini",
+      "provider": null,
+      "confidence": null,
+      "requestId": "req_841696fd4e2e4e15a201e829",
+      "jobId": null,
+      "latencyMs": 671.04,
+      "tokenUsage": {"prompt_tokens": 453, "completion_tokens": 20, "total_tokens": 473},
+      "validationNotes": [],
+      "timestamp": "2026-09-13T19:14:23.099000Z"
+    }
+  ],
+  "count": 2
+}
+```
+
+Each entry is an [audit operation](#audit-operation).
+
+**SDK:** [`audit()`](sdk.md#audit)
+
+---
+
+## GET /v1/memories/{memoryId}/audit
+
+**Every decision that touched one memory**, newest first.
+
+### Query parameters
+
+| Parameter | Default | |
+|---|---|---|
+| *scope* | | [scope parameters](#scope) |
+| `limit` | `50` | 1–200 |
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/memories/mem_caf4e1adc96f461f8042a9a9/audit?userId=user_123"
+```
+
+```json
+{
+  "operations": [
+    {
+      "operationId": "op_7a90e257a8ee45a7b4fbf54a",
+      "userId": "user_123",
+      "action": "ADD",
+      "memoryId": "mem_caf4e1adc96f461f8042a9a9",
+      "targetMemoryIds": [],
+      "reason": "no related memory exists for this user",
+      "inputContent": "User prefers delivery after 7pm.",
+      "candidateMemoryIds": [],
+      "model": "azure_openai:gpt-4o-mini",
+      "provider": "azure_openai",
+      "confidence": 1.0,
+      "requestId": "req_2965a35167ac4cca94afdc5b",
+      "jobId": null,
+      "latencyMs": null,
+      "tokenUsage": {},
+      "validationNotes": [],
+      "timestamp": "2026-09-13T19:14:23.641000Z"
     }
   ],
   "count": 1
 }
 ```
 
-`candidateMemoryIds` records exactly what the model was shown, so a questionable
-decision can be replayed. `validationNotes` records every correction the backend
-made to the model's proposal — dropped ids, clamped scores, refused targets — so
-an overruled model is visible rather than silent.
+`404 not_found` if the memory does not exist in this scope.
+
+**SDK:** [`audit(memory_id=...)`](sdk.md#audit)
 
 ---
 
+# Dream
+
 ## POST /v1/dream/synthesize
 
-Queue a background synthesis run.
+**Find patterns** across a user's memories. See
+[synthesis](concepts.md#synthesis--finding-patterns).
+
+Returns immediately with a job id; the work runs in the background. If a run is
+already queued or running for this user, that job is returned instead of a new
+one. Synthesis also runs automatically as users accumulate memories, so most
+integrations never call this.
+
+### Request body
+
+| Field | Type | Default | |
+|---|---|---|---|
+| *scope* | | | [scope fields](#scope) |
+| `wait` | boolean | `false` | run synthesis before responding and return the finished job. For scripts and tests — synthesis can take seconds |
+| `force` | boolean | `false` | re-evaluate groups that already produced a pattern |
+| `minMemories` | integer | server default (20) | active memories needed before looking, for this run only. 2–1,000 |
+
+### Example
+
+```bash
+curl -X POST http://localhost:8000/v1/dream/synthesize \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123"}'
+```
 
 ```json
 {
-  "phoneNumber": "+919999999999",
-  "botId": "bot_123",
-  "clientId": "client_456"
+  "jobId": "dream_job_cb7dc585344c4eb5",
+  "status": "queued",
+  "patternsCreated": null,
+  "memoriesAnalyzed": null
 }
 ```
 
-| Field | Default | Notes |
-|---|---|---|
-| `wait` | `false` | run inline and return the finished job. For tests, demos and CLI use — synthesis takes seconds, so it has no place on a user-facing path |
-| `force` | `false` | re-evaluate every cluster. Idempotency still applies; this only widens candidate selection |
+With `"wait": true`:
 
 ```json
-{ "jobId": "dream_job_9a8b7c", "status": "queued" }
+{
+  "jobId": "dream_job_cb7dc585344c4eb5",
+  "status": "completed",
+  "patternsCreated": 1,
+  "memoriesAnalyzed": 21
+}
 ```
 
-If a run is already queued or in flight for this user, **that** job is returned
-rather than a second one created — re-running synthesis over unchanged evidence
-spends tokens to reach the same NOOPs.
+### Response
+
+| Field | |
+|---|---|
+| `jobId` | poll it with [`GET /v1/dream/jobs/{jobId}`](#get-v1dreamjobsjobid) |
+| `status` | `queued`, `running`, `completed`, `failed` or `skipped` |
+| `patternsCreated` `memoriesAnalyzed` | only when `wait` is `true`; otherwise `null` |
+
+A job can complete with no patterns: the user may have too few active memories,
+or no group may be similar enough. That is expected — a pattern drawn from a
+handful of loosely related memories would be coincidence, not insight.
+
+**SDK:** [`synthesize()`](sdk.md#synthesize)
 
 ---
 
 ## GET /v1/dream/jobs/{jobId}
 
-Query: scope. Required, deliberately — the specification sketch takes only a job
-id, but a bare random id is not an authorisation check, and job records disclose
-how much of a user is remembered.
+**A synthesis job's status and result.**
+
+### Query parameters
+
+[Scope parameters](#scope). A job belonging to another scope returns
+`404 job_not_found`.
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/dream/jobs/dream_job_cb7dc585344c4eb5?userId=user_123"
+```
 
 ```json
 {
-  "jobId": "dream_job_9a8b7c",
+  "jobId": "dream_job_cb7dc585344c4eb5",
   "status": "completed",
-  "patternsCreated": 3,
-  "patternsUpdated": 1,
-  "patternsSkipped": 2,
-  "memoriesAnalyzed": 87,
-  "clustersEvaluated": 6,
-  "createdPatternIds": ["pat_5f2a", "pat_7c1d", "pat_8e3b"],
+  "patternsCreated": 1,
+  "patternsUpdated": 0,
+  "patternsSkipped": 0,
+  "memoriesAnalyzed": 21,
+  "clustersEvaluated": 3,
+  "createdPatternIds": ["pat_4f1c9e2a7b3d4e5f8a6c0b12"],
   "error": null,
-  "createdAt": "2026-08-13T03:00:00Z",
-  "completedAt": "2026-08-13T03:00:12Z",
-  "durationMs": 12043.7
+  "createdAt": "2026-09-13T19:14:24.789000Z",
+  "completedAt": "2026-09-13T19:14:31.201000Z",
+  "durationMs": 6412.0
 }
 ```
 
-`status` is one of `queued`, `running`, `completed`, `failed`, `skipped`.
-`skipped` with an `error` string is normal — most commonly the user has fewer
-memories than `synthesis.min_memories`.
+### Response
+
+| Field | |
+|---|---|
+| `status` | `queued`, `running`, `completed`, `failed`, `skipped` |
+| `memoriesAnalyzed` | active memories considered |
+| `clustersEvaluated` | groups of related memories the model examined |
+| `patternsCreated` `patternsUpdated` `patternsSkipped` | outcomes. Skipped groups already had an equivalent pattern |
+| `createdPatternIds` | fetch them with [`GET /v1/memories/{memoryId}`](#get-v1memoriesmemoryid) |
+| `error` | set when `status` is `failed` |
+| `createdAt` `completedAt` `durationMs` | |
+
+**SDK:** [`get_job()`](sdk.md#get_job), [`wait_for()`](sdk.md#wait_for)
 
 ---
 
 ## GET /v1/dream/jobs
 
-Query: scope, `limit` (≤ 100), `offset`.
+**A user's synthesis jobs**, newest first.
 
-## GET /v1/dream/stats
+### Query parameters
+
+| Parameter | Default | |
+|---|---|---|
+| *scope* | | [scope parameters](#scope) |
+| `limit` | `20` | 1–100 |
+| `offset` | `0` | |
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/dream/jobs?userId=user_123"
+```
 
 ```json
 {
-  "counts": { "active": 42, "superseded": 8, "merged": 5, "expired": 0 },
-  "patterns": 3,
-  "actions": { "ADD": 44, "SUPERSEDE": 8, "MERGE": 5, "NOOP": 19, "SYNTHESIZE": 3 }
+  "jobs": [
+    {
+      "jobId": "dream_job_cb7dc585344c4eb5",
+      "userId": "user_123",
+      "agentId": null,
+      "clientId": null,
+      "namespace": {},
+      "scopeKey": "9dc7ad5b46771f7e11d973ecee453a23",
+      "status": "completed",
+      "jobType": "synthesis",
+      "memoriesAnalyzed": 21,
+      "clustersEvaluated": 3,
+      "patternsCreated": 1,
+      "patternsUpdated": 0,
+      "patternsSkipped": 0,
+      "noopDecisions": 2,
+      "error": null,
+      "createdPatternIds": ["pat_4f1c9e2a7b3d4e5f8a6c0b12"],
+      "createdAt": "2026-09-13T19:14:24.789000Z",
+      "startedAt": "2026-09-13T19:14:24.789000Z",
+      "completedAt": "2026-09-13T19:14:31.201000Z",
+      "durationMs": 6412.0,
+      "requestedBy": null,
+      "metadata": {"force": false, "minMemories": 3}
+    }
+  ],
+  "count": 1
 }
 ```
 
-The action tallies are the first place to look when tuning thresholds: all
-`NOOP` means the bars are too high, all `ADD` means consolidation is not firing.
+Each entry is a full [dream job](#dream-job), with more fields than
+[`GET /v1/dream/jobs/{jobId}`](#get-v1dreamjobsjobid) returns.
+
+**SDK:** [`list_jobs()`](sdk.md#list_jobs)
 
 ---
 
-## Operations
+## GET /v1/dream/stats
 
-| | |
-|---|---|
-| `GET /health` | liveness. Does not touch dependencies, so an orchestrator will not restart the service because the database blipped |
-| `GET /ready` | readiness. `503` if the canonical store or the vector store is down; the body still names which |
-| `GET /v1/metrics` | counters and latency histograms as JSON |
-| `GET /v1/metrics/tokens` | token usage split by operation, with an estimated cost |
+**Counts, decisions and cost for one user.** Durable — computed from stored data,
+so correct across restarts and replicas.
 
-`/ready` reports every dependency, not just the failing one:
+### Query parameters
+
+[Scope parameters](#scope).
+
+### Example
+
+```bash
+curl "http://localhost:8000/v1/dream/stats?userId=user_123"
+```
 
 ```json
 {
-  "status": "degraded",
-  "version": "0.1.0",
-  "checks": {
-    "database": { "ok": false, "provider": "mongodb", "error": "connection refused" },
-    "vector_store": { "ok": true, "provider": "faiss" },
-    "queue": { "ok": true, "provider": "database" },
-    "embeddings": { "provider": "azure_openai", "model": "azure:text-embedding-3-small", "dimensions": 1536 },
-    "llm": { "provider": "azure_openai", "model": "azure:gpt-4o-mini" }
+  "counts": {"active": 4, "superseded": 0, "merged": 0, "expired": 1},
+  "patterns": 0,
+  "actions": {"ADD": 4, "EXPIRE": 1, "MANUAL_ADD": 1, "MANUAL_UPDATE": 1, "NOOP": 2},
+  "tokens": {
+    "byAction": {
+      "ADD": {"operations": 4, "inputTokens": 603, "outputTokens": 71},
+      "EXPIRE": {"operations": 1, "inputTokens": 0, "outputTokens": 0},
+      "MANUAL_ADD": {"operations": 1, "inputTokens": 0, "outputTokens": 0},
+      "MANUAL_UPDATE": {"operations": 1, "inputTokens": 0, "outputTokens": 0},
+      "NOOP": {"operations": 2, "inputTokens": 453, "outputTokens": 20}
+    },
+    "totals": {
+      "operations": 9,
+      "inputTokens": 1056,
+      "outputTokens": 91,
+      "totalTokens": 1147,
+      "estimatedCost": 0.000213
+    },
+    "currency": "USD"
   }
 }
 ```
 
-`embeddings` and `llm` are reported but are not hard dependencies: a provider
-outage should not take the service out of rotation while reads still work.
+### Response
 
-`/v1/metrics` is deliberately not the Prometheus text format — with
-`DREAM_OTEL_ENABLED=true` the same instruments export over OTLP, which is the
-path meant for real scraping. This endpoint is for eyeballing a running instance.
+| Field | |
+|---|---|
+| `counts` | memories by status |
+| `patterns` | active patterns |
+| `actions` | decisions taken, by [audit action](#audit-operation) |
+| `tokens.byAction` | LLM tokens spent, by action |
+| `tokens.totals.estimatedCost` | estimated from the server's configured prices — an estimate, not a bill |
 
-Counters include `memories_added`, `memories_merged`, `memories_superseded`,
-`patterns_created`, `patterns_updated`, `noop_decisions`, `llm_calls`,
-`llm_tokens`, `embedding_calls`, `vector_searches`, `synthesis_runs`.
-Histograms include `llm_latency_ms`, `embedding_latency_ms`,
-`vector_search_latency_ms`, `retrieval_latency_ms`, `dream_latency_ms`,
-`synthesis_duration_ms`.
+The `actions` tally is the first place to look when tuning: mostly `NOOP` means
+extraction is too strict for your messages; only `ADD` means supersede and merge
+are not firing.
 
-`/v1/metrics/tokens` splits spend by operation, which is what tells you *where*
-the tokens went rather than only how many there were:
+**SDK:** [`stats()`](sdk.md#stats)
+
+---
+
+## POST /v1/dream/consolidate
+
+**Retire memories that no longer earn their place**, for one user — the same pass
+the server runs for every user each night. See
+[consolidation](concepts.md#consolidation--forgetting-safely).
+
+**A dry run by default.** Without `"dryRun": false` it reports what it would do
+and changes nothing. Retiring moves memories to `expired`, and compaction to
+`merged`; nothing is deleted.
+
+### Request body
+
+| Field | Type | Default | |
+|---|---|---|---|
+| *scope* | | | [scope fields](#scope) |
+| `dryRun` | boolean | **`true`** | `false` to apply |
+| `compact` | boolean | `false` | also fold crowds of near-identical, low-value memories into summaries. One model call per group |
+| `compactMinMemories` | integer | server default (40) | eligible memories needed before compaction runs. 2–1,000 |
+| `decay` | boolean | server default (off) | apply the recall-decay rule in this run |
+| `decayAfterDays` | integer | server default (90) | not recalled for this many days makes a memory a candidate. 1–3,650 |
+| `decayImportanceFloor` | number | server default (0.5) | memories at or above this importance are never decayed |
+| `recallEpoch` | date | server default | the date recall tracking began, e.g. `"2026-01-01"`. **Decay cannot fire without one** |
+
+Every override applies to this request only and never changes the nightly pass.
+
+The three rules:
+
+| Rule | Retires | Runs |
+|---|---|---|
+| lapsed | memories whose `validUntil` has passed | always |
+| decay | memories not recalled within `decayAfterDays`, below `decayImportanceFloor` | with `decay` and a `recallEpoch` |
+| compaction | groups of similar low-importance memories, replaced by one summary | with `compact` |
+
+None of them touches `permanent` memories, memories an active pattern rests on, or
+recent memories.
+
+### Example: measure first
+
+```bash
+curl -X POST http://localhost:8000/v1/dream/consolidate \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123", "decay": true, "decayAfterDays": 30, "recallEpoch": "2026-01-01"}'
+```
+
+```json
+{
+  "dryRun": true,
+  "scanned": 65,
+  "lapsed": 2,
+  "decayed": 54,
+  "expired": 0,
+  "protected": 4,
+  "expiredIds": [],
+  "clusters": 0,
+  "compacted": 0,
+  "absorbed": 0,
+  "rejected": 0,
+  "decayApplied": true,
+  "durationMs": 97.95
+}
+```
+
+### Example: apply, with compaction
+
+```bash
+curl -X POST http://localhost:8000/v1/dream/consolidate \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_123", "dryRun": false, "compact": true}'
+```
+
+```json
+{
+  "dryRun": false,
+  "scanned": 65,
+  "lapsed": 2,
+  "decayed": 0,
+  "expired": 2,
+  "protected": 0,
+  "expiredIds": ["mem_c86671721476405597a535a2", "mem_3f882044fbc64983a8693089"],
+  "clusters": 5,
+  "compacted": 5,
+  "absorbed": 50,
+  "rejected": 0,
+  "decayApplied": false,
+  "durationMs": 16440.53
+}
+```
+
+### Response
+
+| Field | |
+|---|---|
+| `dryRun` | whether anything was changed |
+| `scanned` | active memories examined |
+| `lapsed` | memories whose validity window has closed |
+| `decayed` | decay candidates. Reported even when decay was not applied — that is how you choose a window |
+| `expired` | memories actually retired. Always `0` in a dry run |
+| `protected` | candidates kept because an active pattern rests on them |
+| `expiredIds` | the first 20 retired ids |
+| `clusters` | compaction: groups found |
+| `compacted` | compaction: summaries written |
+| `absorbed` | compaction: memories folded into summaries |
+| `rejected` | compaction: summaries refused — the model declined, or the summary looked lossy |
+| `decayApplied` | whether decay was in force for this run |
+| `durationMs` | server time |
+
+In a dry run, applying would retire `lapsed`, plus `decayed` when `decayApplied`
+is `true`.
+
+**SDK:** [`consolidate()`](sdk.md#consolidate)
+
+---
+
+# Operations
+
+These endpoints are not scoped and are meant for infrastructure: load balancers,
+orchestrators and dashboards.
+
+## GET /health
+
+**Liveness.** Returns `200` whenever the process is up. Touches no dependency, so
+an orchestrator will not restart the service because the database blipped.
+
+```json
+{"status": "ok", "version": "0.1.0", "checks": {}}
+```
+
+## GET /ready
+
+**Readiness**, with a check for every dependency.
+
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "checks": {
+    "database": {"ok": true, "provider": "mongodb"},
+    "vector_store": {"ok": true, "provider": "faiss"},
+    "queue": {"ok": true, "provider": "inline", "depth": 0},
+    "embeddings": {"provider": "azure_openai", "model": "azure_openai:text-embedding-3-small", "dimensions": 1536},
+    "llm": {"provider": "azure_openai", "model": "azure_openai:gpt-4o-mini"}
+  }
+}
+```
+
+| `status` | HTTP | Meaning |
+|---|---|---|
+| `ok` | 200 | everything is answering |
+| `degraded` | 200 | the job queue is down: background synthesis is affected, reads and writes are not. Keep the instance in rotation |
+| `degraded` | 503 | the database or vector store is down. Take the instance out of rotation |
+
+A failing check carries `"ok": false` and an `error`.
+
+## GET /v1/metrics
+
+**Counters and latency histograms** for this process, as JSON, plus the same
+token report as [`/v1/metrics/tokens`](#get-v1metricstokens). Keys: `counters`,
+`histograms`, `tokens`.
+
+```json
+{
+  "counters": {
+    "llm_calls": {
+      "operation=extract,provider=azure_openai": 3.0,
+      "operation=decide,provider=azure_openai": 1.0
+    },
+    "embedding_calls": {
+      "operation=remember,provider=azure_openai": 4.0,
+      "operation=search,provider=azure_openai": 2.0
+    }
+  },
+  "histograms": {"...": "..."},
+  "tokens": {"...": "..."}
+}
+```
+
+In-memory and per process: counters reset on restart, and each replica keeps its
+own. For production monitoring, enable OpenTelemetry export on the server
+(`DREAM_OTEL_ENABLED=true`).
+
+## GET /v1/metrics/tokens
+
+**Token spend by operation** for this process, with an estimated cost.
 
 ```json
 {
   "byOperation": [
     {
       "operation": "decide",
-      "llmCalls": 3,
+      "llmCalls": 1,
       "embeddingCalls": 0,
-      "inputTokens": 88400,
-      "outputTokens": 5900,
-      "embeddingTokens": 900,
-      "totalTokens": 95200,
-      "estimatedCost": 0.016818
+      "inputTokens": 603,
+      "outputTokens": 71,
+      "embeddingTokens": 0,
+      "totalTokens": 674,
+      "estimatedCost": 0.000133
     },
     {
       "operation": "extract",
       "llmCalls": 3,
       "embeddingCalls": 0,
-      "inputTokens": 41200,
-      "outputTokens": 3100,
+      "inputTokens": 1374,
+      "outputTokens": 232,
       "embeddingTokens": 0,
-      "totalTokens": 44300,
-      "estimatedCost": 0.00804
+      "totalTokens": 1606,
+      "estimatedCost": 0.000345
+    },
+    {
+      "operation": "search",
+      "llmCalls": 0,
+      "embeddingCalls": 2,
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "embeddingTokens": 12,
+      "totalTokens": 12,
+      "estimatedCost": 0.0
     }
   ],
   "totals": {
-    "inputTokens": 129600,
-    "outputTokens": 9000,
-    "embeddingTokens": 900,
-    "llmCalls": 6,
-    "embeddingCalls": 0,
-    "totalTokens": 139500,
-    "estimatedCost": 0.024858
+    "inputTokens": 1977,
+    "outputTokens": 303,
+    "embeddingTokens": 51,
+    "llmCalls": 4,
+    "embeddingCalls": 7,
+    "totalTokens": 2331,
+    "estimatedCost": 0.000479
   },
   "pricing": {
     "currency": "USD",
     "llmInputPer1M": 0.15,
     "llmOutputPer1M": 0.6,
     "embeddingPer1M": 0.02,
-    "note": "Estimates from configured rates, not billed amounts. ..."
+    "note": "Estimates from configured rates, not billed amounts. Set them under `pricing` in config/dream.yaml to match your deployment and region."
   }
 }
 ```
 
-Input and output are reported separately because they are priced separately, and
-`operation` is what makes "what does one `add` actually cost?" answerable at all.
-
-Cost is **an estimate derived from the configured rates, never a billed
-amount** — rates change, vary by region and commitment, and your deployment may
-not use these models. Set `pricing.*` in `config/dream.yaml` to match your own
-contract, or to `0` to switch cost reporting off.
-
-These counters are **process-wide and in memory**: they reset on restart, and a
-second replica keeps its own. For per-user accounting that survives restarts and
-is correct across replicas, use `GET /v1/dream/stats`, which sums the token
-usage recorded on each audit row.
+Operations: `extract` and `decide` (remembering), `remember` (embedding new
+memories), `search`, `manual`, `synthesize`. Process-wide and in-memory, like
+[`/v1/metrics`](#get-v1metrics); for durable per-user cost use
+[`GET /v1/dream/stats`](#get-v1dreamstats).
 
 ---
 
-## Memory object
+# Objects
 
-| Field | Notes |
+## Memory
+
+Returned by search, list, get, history, create and edit. The full field reference
+is in [Concepts → the memory object](concepts.md#the-memory-object).
+
+| Field | Type | |
+|---|---|---|
+| `memoryId` | string | `mem_…`, or `pat_…` for a pattern |
+| `userId` `agentId` `clientId` `namespace` `scopeKey` `phoneNumberHash` | | the scope |
+| `content` | string | |
+| `memoryType` | string | `profile`, `preference`, `goal`, `fact`, `event`, `relationship`, `constraint`, `skill`, `project`, `behavior`, `pattern`, `other`, or your own |
+| `status` | string | `active`, `superseded`, `merged`, `expired` |
+| `importance` `confidence` | number | 0–1 |
+| `explicit` | boolean | stated rather than inferred |
+| `temporalNature` | string | `permanent`, `current`, `temporary`, `historical`, `future` |
+| `createdAt` `updatedAt` | datetime | |
+| `validFrom` `validUntil` | datetime \| null | |
+| `supersededBy` `mergedInto` | string \| null | |
+| `sourceMemoryIds` `sourceMessageIds` | string[] | |
+| `embeddingModel` `embeddingDim` | | the vector itself is never returned |
+| `contentHash` | string | |
+| `lastRecalledAt` | datetime \| null | |
+| `recallCount` | integer | |
+| `stale` | boolean | a pattern whose evidence changed |
+| `lastSynthesizedAt` | datetime \| null | |
+| `metadata` | object | |
+| `score` `scoreBreakdown` | | search results only |
+
+## Decision result
+
+One entry in `results` from [`POST /v1/memories`](#post-v1memories).
+
+| Field | |
 |---|---|
-| `memoryId` | `mem_…`, or `pat_…` for synthesised patterns |
-| `content` | third person, self-contained |
-| `memoryType` | open vocabulary. Well-known: `profile`, `preference`, `goal`, `fact`, `event`, `relationship`, `constraint`, `skill`, `project`, `behavior`, `pattern`, `other` |
-| `status` | `active`, `superseded`, `merged`, `expired` |
-| `importance` `confidence` | 0–1 |
-| `explicit` | `false` when inferred rather than stated. Patterns are always `false` |
-| `temporalNature` | `permanent`, `current`, `temporary`, `historical`, `future`. `permanent` memories are protected from supersede |
-| `createdAt` `updatedAt` | when we learned or last touched it |
-| `validFrom` `validUntil` | when the *fact* is true — distinct from when we learned it |
-| `supersededBy` `mergedInto` | what replaced it |
-| `sourceMemoryIds` | provenance. Mandatory and non-empty on patterns |
-| `sourceMessageIds` | caller-supplied message ids |
-| `stale` | pattern flagged for re-evaluation because its evidence changed. Never auto-deleted |
-| `metadata` | caller-supplied |
+| `action` | `ADD`, `SUPERSEDE`, `MERGE`, `NOOP` |
+| `memoryId` | the resulting memory; `null` for `NOOP` |
+| `content` | the fact as stored |
+| `reason` | the model's explanation, or the rule that decided |
+| `supersededMemoryIds` `mergedMemoryIds` | what it replaced or absorbed |
+| `operationId` | the matching [audit operation](#audit-operation) |
+
+## Audit operation
+
+| Field | |
+|---|---|
+| `operationId` | `op_…` |
+| `userId` `agentId` `clientId` `namespace` `scopeKey` | scope |
+| `action` | see below |
+| `memoryId` | the memory that ended up active as a result; `null` for `NOOP` |
+| `targetMemoryIds` | memories superseded, merged or expired by this operation |
+| `reason` | why |
+| `inputContent` | the input that led to the decision |
+| `candidateMemoryIds` | the existing memories the model was shown |
+| `model` `provider` | which model decided. `provider: "triage"` means small talk was filtered with no model call |
+| `confidence` | |
+| `requestId` `jobId` | what triggered it |
+| `latencyMs` | |
+| `tokenUsage` | `prompt_tokens`, `completion_tokens`, `total_tokens`, when a model was called |
+| `validationNotes` | set when MemDream overruled or trimmed the model's proposal |
+| `timestamp` | |
+
+| `action` | |
+|---|---|
+| `ADD` `SUPERSEDE` `MERGE` `NOOP` | decisions on a remembered message |
+| `MANUAL_ADD` `MANUAL_NOOP` `MANUAL_UPDATE` | [manual create](#post-v1memoriesmanual) (`MANUAL_NOOP`: an identical memory already existed) and [edit](#patch-v1memoriesmemoryid) |
+| `EXPIRE` | a memory retired — forgotten on request or by consolidation |
+| `DELETE` | a memory permanently erased |
+| `SYNTHESIZE` `SYNTHESIZE_UPDATE` | a pattern created or updated by synthesis |
+
+## Dream job
+
+| Field | |
+|---|---|
+| `jobId` | `dream_job_…` |
+| `userId` `agentId` `clientId` `namespace` `scopeKey` | scope |
+| `status` | `queued`, `running`, `completed`, `failed`, `skipped` |
+| `jobType` | `synthesis` |
+| `memoriesAnalyzed` `clustersEvaluated` | |
+| `patternsCreated` `patternsUpdated` `patternsSkipped` `noopDecisions` | |
+| `createdPatternIds` | |
+| `error` | |
+| `createdAt` `startedAt` `completedAt` `durationMs` | |
+| `requestedBy` | |
+| `metadata` | options the run used, and a `consolidation` summary when the pre-synthesis consolidation pass ran |

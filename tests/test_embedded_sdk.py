@@ -215,7 +215,7 @@ async def test_purge_erases_everything_when_confirmed(mem):
 
     counts = await mem.purge(confirm=True)
 
-    assert counts["memories"] >= 1
+    assert counts["deletedMemories"] >= 1
     assert not await mem.list()
 
 

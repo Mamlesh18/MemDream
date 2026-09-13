@@ -7,6 +7,7 @@ handler is in a position to forget the tenancy check.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import Depends, Header, Query, Request
@@ -14,6 +15,7 @@ from fastapi import Depends, Header, Query, Request
 from app.container import DreamContainer
 from app.core.auth import Principal
 from app.core.config import Settings, get_settings
+from app.core.exceptions import ValidationError
 from app.core.identity import build_scope
 from app.core.logging import bind_scope
 from app.models.requests import _ScopedRequest
@@ -82,21 +84,55 @@ async def scope_from_query(
     agent_id: Annotated[str | None, Query(alias="agentId")] = None,
     client_id: Annotated[str | None, Query(alias="clientId")] = None,
     bot_id: Annotated[str | None, Query(alias="botId")] = None,
+    namespace: Annotated[str | None, Query(alias="namespace")] = None,
 ) -> MemoryScope:
-    """Scope for GET endpoints.
+    """Scope for GET and DELETE endpoints.
 
     Every read is scoped, including reads by id. A memory id is a random handle,
     not an authorisation token, so possessing one must not be enough to read the
     record.
+
+    `namespace` travels as a JSON object — `?namespace={"env":"prod"}` — because
+    a query string carries flat values and a partition map is not flat. Without
+    it, a memory written into a namespace could be created and searched but
+    never listed, fetched, audited or erased: every read here resolved to the
+    un-namespaced partition next door and reported it as not found.
     """
     scope = build_scope(
         user_id=user_id,
         phone_number=phone_number,
         agent_id=agent_id or bot_id,
         client_id=principal.resolve_client_id(client_id),
+        namespace=_parse_namespace(namespace),
     )
     bind_scope(scope)
     return scope
 
 
 ScopeDep = Annotated[MemoryScope, Depends(scope_from_query)]
+
+
+def _parse_namespace(raw: str | None) -> dict[str, str]:
+    """Decode the `namespace` query parameter.
+
+    Malformed input is a 422, never an empty namespace. Silently dropping it
+    would read from a different partition than the caller named, and return an
+    empty answer that looks like a real one.
+    """
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except ValueError as exc:
+        raise ValidationError(
+            'namespace must be a JSON object, e.g. {"env":"prod"}',
+            details={"namespace": raw[:200]},
+        ) from exc
+    if not isinstance(value, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    ):
+        raise ValidationError(
+            "namespace must be a JSON object of string keys to string values",
+            details={"namespace": raw[:200]},
+        )
+    return value

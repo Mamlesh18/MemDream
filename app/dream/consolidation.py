@@ -63,8 +63,10 @@ certainty.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
 from app.core.config import ConsolidationSettings, Settings, get_settings
 from app.core.logging import get_logger
@@ -73,6 +75,9 @@ from app.models.enums import MemoryStatus, MemoryType, TemporalNature
 from app.models.memory import Memory, utcnow
 from app.models.scope import MemoryScope
 from app.repositories.base import MemoryRepository
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance only
+    from app.dream.compaction import CompactionEngine
 
 logger = get_logger(__name__)
 
@@ -293,3 +298,80 @@ class ConsolidationEngine:
         return {
             source_id for pattern in patterns for source_id in pattern.source_memory_ids
         }
+
+
+async def run_consolidation_pass(
+    *,
+    consolidation: ConsolidationEngine,
+    compaction: CompactionEngine,
+    settings: Settings,
+    scope: MemoryScope,
+    dry_run: bool = True,
+    compact: bool = False,
+    compact_min_memories: int | None = None,
+    decay: bool | None = None,
+    decay_after_days: int | None = None,
+    decay_importance_floor: float | None = None,
+    recall_epoch: str | None = None,
+) -> dict[str, Any]:
+    """One on-demand pass for one user: retire, then optionally compact.
+
+    Shared by `POST /v1/dream/consolidate` and the SDK's `consolidate()`, so the
+    endpoint and the SDK cannot disagree about what a pass does.
+
+    Overrides are applied to *copies* of the configured settings, never to the
+    live object. One process serves every tenant, and mutating it would quietly
+    change what tonight's pass does to all of them.
+
+    Returns the camelCase shape of `ConsolidateResponse`.
+    """
+    started = time.perf_counter()
+
+    overrides: dict[str, Any] = {}
+    if decay is not None:
+        overrides["decay_enabled"] = decay
+    if decay_after_days is not None:
+        overrides["decay_after_days"] = decay_after_days
+    if decay_importance_floor is not None:
+        overrides["decay_importance_floor"] = decay_importance_floor
+    if recall_epoch is not None:
+        overrides["recall_epoch"] = recall_epoch
+    config = settings.dream.consolidation.model_copy(update=overrides)
+
+    result = await consolidation.run(scope, dry_run=dry_run, config=config)
+    report: dict[str, Any] = {
+        "dryRun": dry_run,
+        "scanned": result.scanned,
+        "lapsed": len(result.lapsed),
+        "decayed": len(result.decayed),
+        "expired": result.expired_count,
+        "protected": len(result.protected),
+        "expiredIds": result.expired[:20],
+        "clusters": 0,
+        "compacted": 0,
+        "absorbed": 0,
+        "rejected": 0,
+        # Asked the engine rather than re-deriving it: an unparseable epoch
+        # disables decay, and the report must not claim otherwise.
+        "decayApplied": config.decay_enabled
+        and consolidation._recall_epoch(config) is not None,
+    }
+
+    if compact:
+        # Retire what is dead before compressing what is left — no point paying
+        # a model call to summarise memories that were about to be expired.
+        compaction_config = settings.dream.compaction
+        if compact_min_memories is not None:
+            compaction_config = compaction_config.model_copy(
+                update={"min_memories": compact_min_memories}
+            )
+        folded = await compaction.run(scope, dry_run=dry_run, config=compaction_config)
+        report.update(
+            clusters=folded.clusters,
+            compacted=len(folded.compacted),
+            absorbed=folded.absorbed,
+            rejected=folded.rejected,
+        )
+
+    report["durationMs"] = (time.perf_counter() - started) * 1000.0
+    return report

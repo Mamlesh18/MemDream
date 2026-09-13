@@ -38,6 +38,7 @@ from memdream.exceptions import (
 )
 from memdream.models import (
     AddResult,
+    ConsolidationReport,
     DecisionResult,
     DreamJob,
     MemoryDetail,
@@ -52,6 +53,7 @@ __all__ = [
     "AddResult",
     "AsyncDreamClient",
     "AsyncMemDream",
+    "ConsolidationReport",
     "DecisionResult",
     "DreamAPIError",
     "DreamAuthError",

@@ -71,8 +71,9 @@ class AddMemoryRequest(_ScopedRequest):
     #: "last month" during extraction.
     timestamp: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    #: Skip the Dream reasoner and store the prompt verbatim as one memory.
-    #: For callers that have already decided what to remember.
+    #: Skip extraction and store the prompt verbatim as one memory. The ADD /
+    #: SUPERSEDE / MERGE decision still runs against it, so a raw write can
+    #: still replace or merge with what is already known.
     raw: bool = False
 
 

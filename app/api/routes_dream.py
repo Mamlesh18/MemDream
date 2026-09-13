@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AuthDep, ContainerDep, ScopeDep, scope_from_request
 from app.core.logging import get_logger
+from app.dream.consolidation import run_consolidation_pass
 from app.models.requests import (
     ConsolidateRequest,
     ConsolidateResponse,
@@ -81,54 +81,28 @@ async def run_consolidation(
     because one process serves every tenant.
     """
     scope = scope_from_request(body, principal, container.settings)
-    started = time.perf_counter()
 
-    # A copy, never the live settings object: mutating that would change the
-    # rules for every other tenant's pass in this process.
-    overrides: dict[str, object] = {}
-    if body.decay is not None:
-        overrides["decay_enabled"] = body.decay
-    if body.decay_after_days is not None:
-        overrides["decay_after_days"] = body.decay_after_days
-    if body.decay_importance_floor is not None:
-        overrides["decay_importance_floor"] = body.decay_importance_floor
-    if body.recall_epoch is not None:
-        overrides["recall_epoch"] = body.recall_epoch
-    config = container.settings.dream.consolidation.model_copy(update=overrides)
-
-    result = await container.consolidation.run(scope, dry_run=body.dry_run, config=config)
-
-    response = ConsolidateResponse(
+    # The same function the SDK's `consolidate()` calls, so the endpoint and the
+    # SDK cannot disagree about what a pass does. Overrides are applied inside
+    # it, to copies of the configured settings, never to the live object.
+    report = await run_consolidation_pass(
+        consolidation=container.consolidation,
+        compaction=container.compaction,
+        settings=container.settings,
+        scope=scope,
         dry_run=body.dry_run,
-        scanned=result.scanned,
-        lapsed=len(result.lapsed),
-        decayed=len(result.decayed),
-        expired=result.expired_count,
-        protected=len(result.protected),
-        expired_ids=result.expired[:20],
-        decay_applied=config.decay_enabled and bool(config.recall_epoch),
+        compact=body.compact,
+        compact_min_memories=body.compact_min_memories,
+        decay=body.decay,
+        decay_after_days=body.decay_after_days,
+        decay_importance_floor=body.decay_importance_floor,
+        recall_epoch=body.recall_epoch,
     )
+    response = ConsolidateResponse.model_validate(report)
 
-    if body.compact:
-        # Retire what is dead before compressing what is left — no point paying
-        # a model call to summarise memories that were about to be expired.
-        compaction_config = container.settings.dream.compaction
-        if body.compact_min_memories is not None:
-            compaction_config = compaction_config.model_copy(
-                update={"min_memories": body.compact_min_memories}
-            )
-        folded = await container.compaction.run(
-            scope, dry_run=body.dry_run, config=compaction_config
-        )
-        response.clusters = folded.clusters
-        response.compacted = len(folded.compacted)
-        response.absorbed = folded.absorbed
-        response.rejected = folded.rejected
-
-    response.duration_ms = (time.perf_counter() - started) * 1000.0
     logger.info(
         "consolidate_requested",
-        dry_run=body.dry_run,
+        dry_run=response.dry_run,
         scanned=response.scanned,
         expired=response.expired,
         compact=body.compact,

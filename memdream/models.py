@@ -241,3 +241,53 @@ class DreamJob:
             duration_ms=data.get("durationMs"),
             raw=data,
         )
+
+
+@dataclass
+class ConsolidationReport:
+    """What a consolidation pass did — or, in a dry run, would have done."""
+
+    dry_run: bool = True
+    scanned: int = 0
+    #: Validity window closed: provably false, retired with no model call.
+    lapsed: int = 0
+    #: Candidates under the decay rule. Reported even when decay is not applied,
+    #: which is how a threshold is measured before anything acts on it.
+    decayed: int = 0
+    #: Actually retired. Always 0 in a dry run.
+    expired: int = 0
+    #: Left alone because an active pattern rests on them.
+    protected: int = 0
+    expired_ids: list[str] = field(default_factory=list)
+    #: Populated only when compaction was requested.
+    clusters: int = 0
+    compacted: int = 0
+    absorbed: int = 0
+    rejected: int = 0
+    decay_applied: bool = False
+    duration_ms: float = 0.0
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def would_retire(self) -> int:
+        """How many memories applying this run would retire."""
+        return self.lapsed + (self.decayed if self.decay_applied else 0)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ConsolidationReport:
+        return cls(
+            dry_run=data.get("dryRun", True),
+            scanned=data.get("scanned", 0),
+            lapsed=data.get("lapsed", 0),
+            decayed=data.get("decayed", 0),
+            expired=data.get("expired", 0),
+            protected=data.get("protected", 0),
+            expired_ids=data.get("expiredIds", []) or [],
+            clusters=data.get("clusters", 0),
+            compacted=data.get("compacted", 0),
+            absorbed=data.get("absorbed", 0),
+            rejected=data.get("rejected", 0),
+            decay_applied=data.get("decayApplied", False),
+            duration_ms=data.get("durationMs", 0.0),
+            raw=data,
+        )

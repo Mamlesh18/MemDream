@@ -249,7 +249,8 @@ job = client.dream.wait_for(job.job_id)
 
 The two have **the same method names, arguments and return types**, so moving a
 prototype onto a deployed service changes the constructor line and nothing else.
-`AsyncMemDream` and `AsyncDreamClient` are the awaitable equivalents.
+`AsyncMemDream` and `AsyncDreamClient` are the awaitable equivalents. Full
+reference: [`docs/sdk.md`](docs/sdk.md).
 
 |  | `MemDream` (embedded) | `DreamClient` (hosted) |
 |---|---|---|
@@ -587,10 +588,13 @@ down by operation, and per-user at `GET /v1/dream/stats`.
 
 | | |
 |---|---|
-| [`docs/diagrams.md`](docs/diagrams.md) | Architecture diagrams — start here |
+| [`docs/concepts.md`](docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream — start here |
+| [`docs/sdk.md`](docs/sdk.md) | Python SDK reference, embedded and hosted |
+| [`docs/api.md`](docs/api.md) | REST API reference — every endpoint |
+| [`docs/self-hosting.md`](docs/self-hosting.md) | Deploying and configuring the service |
+| [`docs/diagrams.md`](docs/diagrams.md) | Architecture diagrams |
 | [`docs/how-it-works.md`](docs/how-it-works.md) | Technical walkthrough with code references |
 | [`docs/architecture.md`](docs/architecture.md) | Why each decision went the way it did |
-| [`docs/api.md`](docs/api.md) | Endpoint reference |
 | [`config/dream.yaml`](config/dream.yaml) | Every tunable, annotated |
 | [`examples/`](examples/) | Runnable integrations |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |

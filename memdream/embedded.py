@@ -50,6 +50,7 @@ will exhaust the database's connection limit under load.
 from __future__ import annotations
 
 import asyncio
+import functools
 import threading
 from concurrent.futures import Future
 from datetime import datetime
@@ -57,6 +58,7 @@ from typing import TYPE_CHECKING, Any
 
 from memdream.models import (
     AddResult,
+    ConsolidationReport,
     DreamJob,
     MemoryDetail,
     MemoryRecord,
@@ -213,8 +215,21 @@ class AsyncMemDream:
         Built through `build_scope` rather than `MemoryScope(...)` directly, so
         the embedded path derives a user id from a phone number exactly the way
         the HTTP path does — same salt, same digest, same partition.
+
+        An unrecognised keyword raises rather than being ignored: a misspelt
+        `clinet_id` quietly dropped would read from a different partition than
+        the caller named.
         """
         from app.core.identity import build_scope
+
+        unknown = set(kwargs) - {
+            "user_id", "phone_number", "agent_id", "client_id", "namespace", "bot_id"
+        }
+        if unknown:
+            raise TypeError(
+                f"Unexpected argument(s): {', '.join(sorted(unknown))}. Scope arguments "
+                "are: user_id, phone_number, agent_id, client_id, namespace, bot_id"
+            )
 
         container = await self.start()
         merged = {
@@ -222,6 +237,11 @@ class AsyncMemDream:
             **{k: v for k, v in kwargs.items() if v is not None},
         }
         namespace = {**self._defaults["namespace"], **(kwargs.get("namespace") or {})}
+        if not merged.get("user_id") and not merged.get("phone_number"):
+            raise ValueError(
+                "Either user_id or phone_number must be supplied, on the call or "
+                "as a client default"
+            )
         return build_scope(
             user_id=merged.get("user_id"),
             phone_number=merged.get("phone_number"),
@@ -248,6 +268,15 @@ class AsyncMemDream:
         `raw=True` skips extraction and stores the text verbatim as one memory,
         while still running the ADD/SUPERSEDE/MERGE decision against it.
         """
+        if not prompt or len(prompt) > 20000:
+            from memdream.exceptions import DreamValidationError
+
+            raise DreamValidationError(
+                "prompt must be between 1 and 20000 characters",
+                status_code=422,
+                code="validation_error",
+            )
+
         container = await self.start()
         scope = await self._scope(scope_kwargs)
 
@@ -340,6 +369,8 @@ class AsyncMemDream:
             for key in ("user_id", "phone_number", "agent_id", "client_id", "namespace", "bot_id")
             if key in changes
         }
+        if not changes:
+            raise ValueError("Supply at least one field to update")
         scope = await self._scope(scope_kwargs)
 
         memory = await container.memory_service.update_manual(
@@ -377,7 +408,7 @@ class AsyncMemDream:
             "permanent": permanent,
         }
 
-    async def purge(self, *, confirm: bool = False, **scope_kwargs: Any) -> dict[str, int]:
+    async def purge(self, *, confirm: bool = False, **scope_kwargs: Any) -> dict[str, Any]:
         """Erase everything for one user: memories, edges, audit trail, jobs.
 
         `confirm=True` is required. Irreversible, and the audit trail goes too —
@@ -389,7 +420,16 @@ class AsyncMemDream:
 
         container = await self.start()
         scope = await self._scope(scope_kwargs)
-        return await container.memory_service.purge_user(scope)
+        counts = await container.memory_service.purge_user(scope)
+        # The same field names `DELETE /v1/memories` returns, so code reading the
+        # result does not care which mode produced it.
+        return {
+            "deletedMemories": counts.get("memories", 0),
+            "deletedRelations": counts.get("relations", 0),
+            "deletedOperations": counts.get("operations", 0),
+            "deletedJobs": counts.get("jobs", 0),
+            "operationId": None,
+        }
 
     # --- recall ---------------------------------------------------------------- #
 
@@ -507,22 +547,48 @@ class AsyncMemDream:
             raise DreamNotFoundError(f"Memory {memory_id} not found")
         return [MemoryRecord.from_dict(memory.public_dump()) for memory in chain]
 
-    async def audit(self, *, limit: int = 50, **scope_kwargs: Any) -> list[dict[str, Any]]:
-        """Every Dream decision for this user, NOOPs included.
+    async def audit(
+        self,
+        *,
+        memory_id: str | None = None,
+        action: list[str] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        **scope_kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Every Dream decision for this user, NOOPs included — or, with
+        `memory_id`, every decision that touched that one memory.
 
         The NOOPs are the useful ones when nothing is being remembered and you
-        need to find out why.
+        need to find out why. `action` and `offset` apply to the user-wide log
+        only.
         """
         container = await self.start()
         scope = await self._scope(scope_kwargs)
 
-        operations = await container.audit.list_for_scope(scope, limit=limit)
+        if memory_id is not None:
+            # Scope-check first: the audit trail is keyed by memory id, so
+            # reading it directly would bypass the tenancy filter.
+            if await container.memories.get(scope, memory_id) is None:
+                from memdream.exceptions import DreamNotFoundError
+
+                raise DreamNotFoundError(f"Memory {memory_id} not found")
+            operations = await container.audit.list_for_memory(memory_id, limit=limit)
+        else:
+            operations = await container.audit.list_for_scope(
+                scope, limit=limit, offset=offset, actions=action
+            )
         return [op.model_dump(by_alias=True, mode="json") for op in operations]
 
     # --- dream ----------------------------------------------------------------- #
 
     async def synthesize(
-        self, *, wait: bool = False, force: bool = False, **scope_kwargs: Any
+        self,
+        *,
+        wait: bool = False,
+        force: bool = False,
+        min_memories: int | None = None,
+        **scope_kwargs: Any,
     ) -> DreamJob:
         """Look for patterns across this user's memories.
 
@@ -533,7 +599,11 @@ class AsyncMemDream:
         scope = await self._scope(scope_kwargs)
 
         job = await container.dream_service.request_synthesis(
-            scope, wait=wait, force=force, requested_by="embedded-sdk"
+            scope,
+            wait=wait,
+            force=force,
+            min_memories=min_memories,
+            requested_by="embedded-sdk",
         )
         return DreamJob.from_dict(job.public_dump())
 
@@ -570,11 +640,57 @@ class AsyncMemDream:
                 )
             await asyncio.sleep(poll_interval)
 
-    async def list_jobs(self, *, limit: int = 20, **scope_kwargs: Any) -> list[DreamJob]:
+    async def list_jobs(
+        self, *, limit: int = 20, offset: int = 0, **scope_kwargs: Any
+    ) -> list[DreamJob]:
         container = await self.start()
         scope = await self._scope(scope_kwargs)
-        jobs = await container.dream_service.list_jobs(scope, limit=limit)
+        jobs = await container.dream_service.list_jobs(scope, limit=limit, offset=offset)
         return [DreamJob.from_dict(job.public_dump()) for job in jobs]
+
+    async def consolidate(
+        self,
+        *,
+        dry_run: bool = True,
+        compact: bool = False,
+        compact_min_memories: int | None = None,
+        decay: bool | None = None,
+        decay_after_days: int | None = None,
+        decay_importance_floor: float | None = None,
+        recall_epoch: Any = None,
+        **scope_kwargs: Any,
+    ) -> ConsolidationReport:
+        """Retire memories that no longer earn their place — the nightly pass,
+        run now for one user.
+
+        **`dry_run` defaults to True**: it reports what would happen and changes
+        nothing. Nothing is ever deleted either way — retiring is a status change
+        to `expired`, so a wrong call costs a flip rather than a row.
+
+        Every override applies to this call only and never changes what the
+        nightly pass does. Decay needs `recall_epoch` before it can fire at all.
+        """
+        from app.dream.consolidation import run_consolidation_pass
+
+        container = await self.start()
+        scope = await self._scope(scope_kwargs)
+        if hasattr(recall_epoch, "isoformat"):
+            recall_epoch = recall_epoch.isoformat()
+
+        report = await run_consolidation_pass(
+            consolidation=container.consolidation,
+            compaction=container.compaction,
+            settings=container.settings,
+            scope=scope,
+            dry_run=dry_run,
+            compact=compact,
+            compact_min_memories=compact_min_memories,
+            decay=decay,
+            decay_after_days=decay_after_days,
+            decay_importance_floor=decay_importance_floor,
+            recall_epoch=recall_epoch,
+        )
+        return ConsolidationReport.from_dict(report)
 
     async def stats(self, **scope_kwargs: Any) -> dict[str, Any]:
         """Counts by status, token spend and estimated cost for this user."""
@@ -671,6 +787,7 @@ class MemDream:
         "wait_for",
         "list_jobs",
         "stats",
+        "consolidate",
         "health",
     )
 
@@ -708,6 +825,66 @@ class MemDream:
         self.close()
 
 
+def _translate(exc: Exception) -> Exception:
+    """Map an engine exception onto the SDK's own exception types.
+
+    Hosted, a failure crosses HTTP and arrives as `DreamValidationError`,
+    `DreamNotFoundError` or `DreamAPIError` carrying a status code. Embedded, the
+    same failure used to surface as whatever the engine raised internally — a
+    pydantic `ValidationError`, an `InvalidStateTransitionError` — so an `except`
+    clause written against one mode silently missed in the other.
+
+    The status codes are the ones the API would have returned for the same
+    failure. `ValueError` and `TypeError` from local argument checks pass through
+    unchanged, as they do in the hosted client.
+    """
+    from pydantic import ValidationError as PydanticValidationError
+
+    from app.core.exceptions import DreamError as EngineError
+    from memdream.exceptions import DreamError, error_for
+
+    if isinstance(exc, DreamError):
+        return exc
+    if isinstance(exc, EngineError):
+        payload = {"error": {"code": exc.code, "message": exc.message, "details": exc.details}}
+        return error_for(exc.status_code, payload, None)
+    if isinstance(exc, PydanticValidationError):
+        errors = [
+            {
+                "loc": [str(part) for part in error.get("loc", ())],
+                "message": error.get("msg", ""),
+                "type": error.get("type", ""),
+            }
+            for error in exc.errors()
+        ]
+        payload = {
+            "error": {
+                "code": "validation_error",
+                "message": "Request failed validation",
+                "details": {"errors": errors},
+            }
+        }
+        return error_for(422, payload, None)
+    return exc
+
+
+def _translating(method):
+    """Wrap one `AsyncMemDream` operation so it raises SDK exception types."""
+
+    @functools.wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        try:
+            return await method(self, *args, **kwargs)
+        except Exception as exc:
+            translated = _translate(exc)
+            if translated is exc:
+                raise
+            raise translated from exc
+
+    return wrapper
+
+
 for _name in MemDream._WRAPPED:
+    setattr(AsyncMemDream, _name, _translating(getattr(AsyncMemDream, _name)))
     setattr(MemDream, _name, _sync_method(_name))
 del _name
