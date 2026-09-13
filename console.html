@@ -281,6 +281,7 @@
         <label for="minMemories">min</label>
         <input id="minMemories" type="number" min="2" max="1000" placeholder="20">
       </span>
+      <button id="btnConsolidate" title="Retire memories that are no longer true, and optionally fold crowds of low-value ones together. Opens a dry run first.">Consolidate</button>
       <button id="btnStats">Stats</button>
       <button id="btnTokens">Tokens &amp; cost</button>
       <button id="btnMetrics">Metrics</button>
@@ -404,6 +405,7 @@ const api = {
                                  // of "override with nothing".
                                  ...(minMemories ? { minMemories } : {}),
                                }),
+  consolidate:(opts)        => call("POST", "/v1/dream/consolidate", { ...scope(), ...opts }),
   job:        (id)          => call("GET",  `/v1/dream/jobs/${id}?${scopeQuery()}`),
   jobs:       ()            => call("GET",  `/v1/dream/jobs?${scopeQuery()}`),
   stats:      ()            => call("GET",  `/v1/dream/stats?${scopeQuery()}`),
@@ -943,6 +945,166 @@ async function doDream() {
   } catch (err) { showModal("Error", `<p>${esc(err.message)}</p>`); }
 }
 
+/* ---------- consolidation: the nightly pass, on demand ---------- */
+
+/* Two steps on purpose. This endpoint retires memories, so the first thing it
+   ever shows you is a dry run - you see what would happen, then decide. The
+   "Apply" button only appears once there is something to apply. */
+
+function openConsolidate() {
+  showModal("Consolidate", `
+    <p><code>POST /v1/dream/consolidate</code> &mdash; the same pass the nightly scheduler
+    runs for every user, run now for this one.</p>
+    <p style="color:var(--dim)">Nothing is deleted. Retiring a memory means a status change
+    to <code>expired</code>: the row is kept and leaves the search index, so being wrong
+    costs a flip rather than a row.</p>
+
+    <h3>Rules</h3>
+    <table>
+      <tr><th style="width:96px">lapsed</th><td><b>Always on.</b> The validity window has
+        closed, so the memory is not stale &mdash; it is false. No model, no embedding.</td></tr>
+      <tr><th>decayed</th><td>Nothing has recalled it inside the window. A judgement rather
+        than a fact, so it is opt-in and needs an epoch before it can fire at all.</td></tr>
+      <tr><th>compact</th><td>Folds crowds of near-identical low-value memories into one
+        summary. The only part that costs a model call.</td></tr>
+    </table>
+
+    <h3>Options for this run</h3>
+    <p style="color:var(--dim)">These override configuration for this call only &mdash; they
+    never change what tonight's pass will do.</p>
+    <table>
+      <tr><th style="width:150px"><label for="cDecay">recall decay</label></th>
+        <td><input type="checkbox" id="cDecay"> retire what nothing has recalled</td></tr>
+      <tr><th><label for="cAfter">window (days)</label></th>
+        <td><input id="cAfter" type="number" min="1" max="3650" placeholder="90" style="width:90px"></td></tr>
+      <tr><th><label for="cFloor">importance floor</label></th>
+        <td><input id="cFloor" type="number" min="0" max="1" step="0.05" placeholder="0.5" style="width:90px">
+          <span style="color:var(--dim)">at or above this is never decayed</span></td></tr>
+      <tr><th><label for="cEpoch">recall epoch</label></th>
+        <td><input id="cEpoch" type="date" style="width:170px">
+          <span style="color:var(--dim)">when tracking began &mdash; required for decay</span></td></tr>
+      <tr><th><label for="cCompact">compaction</label></th>
+        <td><input type="checkbox" id="cCompact"> fold crowds together (costs a model call)</td></tr>
+      <tr><th><label for="cMin">compact above</label></th>
+        <td><input id="cMin" type="number" min="2" max="1000" placeholder="40" style="width:90px">
+          <span style="color:var(--dim)">eligible memories needed before a model call is worth
+          making</span></td></tr>
+    </table>
+
+    <div class="callout"><p>Decay without an epoch does nothing, deliberately. Every memory
+    written before recall tracking existed reads <code>lastRecalledAt: null</code>, which is
+    indistinguishable from "nothing ever wanted this" &mdash; so on day one that would be true
+    of the entire database.</p></div>
+
+    <p style="margin-top:14px">
+      <button id="btnConsolidateDry" class="primary">Dry run &mdash; change nothing</button>
+    </p>`);
+
+  $("btnConsolidateDry").onclick = () => runConsolidate(true);
+}
+
+function consolidateOptions(dryRun) {
+  const num = (id) => {
+    const v = parseFloat($(id).value);
+    return Number.isFinite(v) ? v : null;
+  };
+  const opts = { dryRun, compact: $("cCompact").checked };
+  if ($("cDecay").checked) opts.decay = true;
+  if (num("cAfter") != null) opts.decayAfterDays = num("cAfter");
+  if (num("cFloor") != null) opts.decayImportanceFloor = num("cFloor");
+  if ($("cEpoch").value) opts.recallEpoch = $("cEpoch").value;
+  if (num("cMin") != null) opts.compactMinMemories = num("cMin");
+  return opts;
+}
+
+async function runConsolidate(dryRun, carried) {
+  const opts = carried || consolidateOptions(dryRun);
+  opts.dryRun = dryRun;
+
+  showModal(dryRun ? "Consolidate - dry run" : "Consolidate - applying", `<p>Running&hellip;</p>`);
+  const t0 = performance.now();
+  let r;
+  try {
+    r = await api.consolidate(opts);
+  } catch (err) {
+    showModal("Error", `<p>${esc(err.message)}</p>`);
+    return;
+  }
+  const waited = Math.round(performance.now() - t0);
+  if (!dryRun) await refreshAll();
+
+  // What *would* be retired if applied. In a dry run nothing is expired yet, so
+  // the two candidate lists are the number that matters.
+  const wouldRetire = r.lapsed + (r.decayApplied ? r.decayed : 0);
+  const acted = dryRun ? wouldRetire : r.expired;
+
+  showModal(dryRun ? "Consolidate - dry run" : "Consolidate - done", `
+    <p><code>POST /v1/dream/consolidate</code>
+      ${dryRun ? `<b style="color:var(--supersede)">dry run &mdash; nothing was changed</b>` : ""}</p>
+
+    <h3>${dryRun ? "What would happen" : "What happened"}</h3>
+    <table>
+      <tr><th style="width:150px">scanned</th><td>${r.scanned} active memories</td></tr>
+      <tr><th>lapsed</th><td>${r.lapsed}
+        <span style="color:var(--dim)">&mdash; validity window closed, provably false</span></td></tr>
+      <tr><th>decay candidates</th><td>${r.decayed}
+        <span style="color:var(--dim)">&mdash; ${r.decayApplied
+          ? "decay is applied in this run"
+          : "reported only; decay is off or has no epoch, so these were left alone"}</span></td></tr>
+      <tr><th>protected</th><td>${r.protected}
+        <span style="color:var(--dim)">&mdash; an active pattern rests on these</span></td></tr>
+      <tr><th>${dryRun ? "would retire" : "retired"}</th><td><b>${acted}</b></td></tr>
+    </table>
+
+    ${opts.compact ? `
+      <h3>Compaction</h3>
+      <table>
+        <tr><th style="width:150px">clusters</th><td>${r.clusters}</td></tr>
+        <tr><th>memories folded</th><td>${r.absorbed}</td></tr>
+        <tr><th>summaries</th><td>${r.compacted}</td></tr>
+        <tr><th>refused</th><td>${r.rejected}
+          <span style="color:var(--dim)">&mdash; the model declined, or the summary looked
+          lossy</span></td></tr>
+      </table>
+      ${r.clusters === 0 ? `<div class="callout"><p>No clusters. Compaction is gated on a user
+      having enough low-value, old, unprotected memories to be worth a model call &mdash; below
+      that it does not ask the model anything.</p>
+      <p style="color:var(--dim)">Note that decay runs first, so retiring a lot of memories can
+      itself drop a user under the gate. Lower <b>compact above</b> to see it work on a small
+      account.</p></div>` : ""}` : ""}
+
+    <h3>Timing</h3>
+    <table>
+      <tr><th style="width:150px">you waited</th><td><b>${waited} ms</b></td></tr>
+      <tr><th>server</th><td>${r.durationMs ? r.durationMs.toFixed(0) + " ms" : "-"}
+        <span style="color:var(--dim)">&mdash; ${opts.compact
+          ? "includes the compaction model calls"
+          : "deterministic: no model, no embedding"}</span></td></tr>
+    </table>
+
+    ${!opts.compact && acted === 0 && r.decayed === 0 ? `<div class="callout"><p>Nothing to do
+    &mdash; every active memory is still either true or too important to retire. That is the
+    expected answer for a young account: consolidation earns its keep over months, not
+    minutes.</p>
+    <p style="color:var(--dim)">To see it work on aged data:
+    <code>python -m scripts.seed_demo --user demo_priya --wipe</code></p></div>` : ""}
+
+    ${r.expiredIds?.length
+      ? `<h3>Retired</h3><div class="flow">${esc(r.expiredIds.join("\n"))}</div>` : ""}
+
+    ${dryRun && (wouldRetire > 0 || r.absorbed > 0) ? `
+      <div class="callout"><p>Applying is reversible in the sense that matters &mdash; every row
+      is kept, and folded memories stay readable with a pointer to the summary that replaced
+      them.</p></div>
+      <p><button id="btnConsolidateApply" class="danger">Apply &mdash; retire ${wouldRetire}${
+        r.absorbed ? `, fold ${r.absorbed}` : ""}</button></p>` : ""}`);
+
+  const apply = $("btnConsolidateApply");
+  // Carry the same options through, so Apply cannot run different rules than the
+  // dry run the user just approved - the form is gone from the DOM by now.
+  if (apply) apply.onclick = () => runConsolidate(false, { ...opts });
+}
+
 async function doStats() {
   try {
     const [stats, jobs] = await Promise.all([api.stats(), api.jobs().catch(() => ({ jobs: [] }))]);
@@ -1325,6 +1487,7 @@ function init() {
   $("btnAddManual").onclick = openCreate;
   $("btnSearch").onclick    = doSearch;
   $("btnDream").onclick     = doDream;
+  $("btnConsolidate").onclick = openConsolidate;
   $("btnStats").onclick     = doStats;
   $("btnTokens").onclick    = doTokens;
   $("btnMetrics").onclick   = doMetrics;

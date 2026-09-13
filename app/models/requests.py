@@ -284,6 +284,71 @@ class DreamJobResponse(_APIModel):
     duration_ms: float | None = None
 
 
+class ConsolidateRequest(_ScopedRequest):
+    """Run a consolidation pass for one user, on demand.
+
+    The nightly scheduler does this for everybody. This endpoint exists for the
+    console, for demos, and for the thing the feature actually needs before it
+    can be trusted: **pointing it at real data and seeing what falls out**.
+
+    Every threshold below overrides configuration *for this call only*. Nothing
+    here changes what the nightly pass will do.
+    """
+
+    #: Defaults to **true**, unlike every other flag in this API. Consolidation
+    #: retires memories, and an endpoint that does that by default on a missing
+    #: field is one nobody should have to remember to disarm.
+    dry_run: bool = True
+
+    #: Also compact — fold crowds of near-identical low-value memories into one.
+    #: The only part of a pass that costs a model call, hence opt-in per request
+    #: as well as in configuration.
+    compact: bool = False
+    #: How many eligible memories a user needs before compaction is worth a
+    #: model call. Lower it to see the machinery work on a small account; the
+    #: configured default exists to keep a nightly pass over a thousand users
+    #: affordable, so do not ship it lowered.
+    compact_min_memories: int | None = Field(default=None, ge=2, le=1000)
+
+    # --- decay overrides, for measuring a threshold before trusting it ------ #
+
+    #: Apply the recall-decay rule in this run even when it is configured off.
+    #: Decay still cannot fire without an epoch, whatever this says.
+    decay: bool | None = None
+    decay_after_days: int | None = Field(default=None, ge=1, le=3650)
+    decay_importance_floor: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: When recall tracking began, ISO date. The cold-start guard — without one,
+    #: every memory predating tracking reads as "never wanted".
+    recall_epoch: str | None = Field(default=None, max_length=32)
+
+
+class ConsolidateResponse(_APIModel):
+    """What the pass did, or would have done."""
+
+    dry_run: bool
+    scanned: int = 0
+    #: Validity window closed. Provably false, and retired with no model.
+    lapsed: int = 0
+    #: Candidates under the decay rule. Reported even when decay is off — that
+    #: is how a threshold is measured before anything acts on it.
+    decayed: int = 0
+    #: Actually retired. Stays 0 in a dry run, and stays 0 for `decayed` while
+    #: decay is off, so it never claims work it declined to do.
+    expired: int = 0
+    #: Left alone because an active pattern rests on them.
+    protected: int = 0
+    expired_ids: list[str] = Field(default_factory=list)
+
+    #: Populated only when `compact` was requested.
+    clusters: int = 0
+    compacted: int = 0
+    absorbed: int = 0
+    rejected: int = 0
+
+    decay_applied: bool = False
+    duration_ms: float = 0.0
+
+
 class AuditLogResponse(_APIModel):
     operations: list[dict[str, Any]] = Field(default_factory=list)
     count: int = 0

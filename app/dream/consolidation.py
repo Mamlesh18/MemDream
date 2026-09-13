@@ -66,7 +66,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from app.core.config import Settings, get_settings
+from app.core.config import ConsolidationSettings, Settings, get_settings
 from app.core.logging import get_logger
 from app.memory.lifecycle import MemoryLifecycle
 from app.models.enums import MemoryStatus, MemoryType, TemporalNature
@@ -128,21 +128,32 @@ class ConsolidationEngine:
         self._settings = settings or get_settings()
 
     async def run(
-        self, scope: MemoryScope, *, now: datetime | None = None, dry_run: bool = False
+        self,
+        scope: MemoryScope,
+        *,
+        now: datetime | None = None,
+        dry_run: bool = False,
+        config: ConsolidationSettings | None = None,
     ) -> ConsolidationResult:
         """Consolidate one user's memories.
 
         ``dry_run`` reports what would be expired without touching anything,
         which is how you check a threshold before trusting it with real data.
+
+        ``config`` overrides the configured thresholds **for this call only**.
+        It exists so an API request or a CLI flag can try a different window
+        without mutating process-wide settings — which, in a server handling
+        several tenants at once, would silently change the rules for everybody
+        else's pass.
         """
         now = now or utcnow()
-        config = self._settings.dream.consolidation
+        config = config or self._settings.dream.consolidation
         result = ConsolidationResult()
 
         active = await self._repository.find(
             scope,
             statuses=[MemoryStatus.ACTIVE],
-            limit=self._settings.dream.consolidation.max_per_run,
+            limit=config.max_per_run,
             include_embedding=False,
         )
         result.scanned = len(active)
@@ -151,7 +162,7 @@ class ConsolidationEngine:
 
         protected = await self._pattern_evidence(scope)
 
-        epoch = self._recall_epoch()
+        epoch = self._recall_epoch(config)
 
         for memory in active:
             if memory.memory_type == MemoryType.PATTERN.value:
@@ -161,7 +172,7 @@ class ConsolidationEngine:
                 continue
 
             lapsed = memory.valid_until is not None and memory.valid_until <= now
-            decayed = epoch is not None and self._has_decayed(memory, now, epoch)
+            decayed = epoch is not None and self._has_decayed(memory, now, epoch, config)
             if not (lapsed or decayed):
                 continue
 
@@ -213,7 +224,7 @@ class ConsolidationEngine:
 
     # --- recall decay ---------------------------------------------------- #
 
-    def _recall_epoch(self) -> datetime | None:
+    def _recall_epoch(self, config: ConsolidationSettings) -> datetime | None:
         """When recall tracking began, or None if it has not been declared.
 
         This is the cold-start guard, and it is required. Every memory written
@@ -225,7 +236,7 @@ class ConsolidationEngine:
         Unparseable fails closed: a typo in a date must not become a mass
         expiry.
         """
-        raw = self._settings.dream.consolidation.recall_epoch
+        raw = config.recall_epoch
         if not raw:
             return None
         try:
@@ -235,14 +246,18 @@ class ConsolidationEngine:
             return None
         return epoch if epoch.tzinfo else epoch.replace(tzinfo=timezone.utc)
 
-    def _has_decayed(self, memory: Memory, now: datetime, epoch: datetime) -> bool:
+    def _has_decayed(
+        self,
+        memory: Memory,
+        now: datetime,
+        epoch: datetime,
+        config: ConsolidationSettings,
+    ) -> bool:
         """Whether disuse has earned this memory a retirement.
 
         Every guard is a veto, and each exists because the alternative is a
         specific, silent, expensive mistake.
         """
-        config = self._settings.dream.consolidation
-
         # Importance outranks disuse, always. This is the line that keeps a
         # peanut allergy in the active set through a year of nobody asking.
         if memory.importance >= config.decay_importance_floor:

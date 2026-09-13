@@ -43,7 +43,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from app.core.config import Settings, get_settings
+from app.core.config import CompactionSettings, Settings, get_settings
 from app.core.exceptions import LLMResponseError, ProviderError
 from app.core.logging import get_logger
 from app.core.metrics import OP_SYNTHESIZE, operation
@@ -117,12 +117,19 @@ class CompactionEngine:
         *,
         now: datetime | None = None,
         dry_run: bool = False,
+        config: CompactionSettings | None = None,
     ) -> CompactionOutcome:
+        """Fold one user's crowd of low-value memories.
+
+        ``config`` overrides the configured thresholds for this call only, so a
+        request or a CLI flag can try a tighter cluster without changing the
+        rules for every other tenant in the process.
+        """
         now = now or utcnow()
-        config = self._settings.dream.compaction
+        config = config or self._settings.dream.compaction
         outcome = CompactionOutcome()
 
-        eligible = await self._eligible(scope, now)
+        eligible = await self._eligible(scope, now, config)
         if len(eligible) < config.min_memories:
             # Not enough clutter to be worth a model call. This gate is what
             # keeps a nightly pass over a thousand users affordable.
@@ -164,7 +171,9 @@ class CompactionEngine:
 
     # --- selection ------------------------------------------------------------ #
 
-    async def _eligible(self, scope: MemoryScope, now: datetime) -> list[Memory]:
+    async def _eligible(
+        self, scope: MemoryScope, now: datetime, config: CompactionSettings
+    ) -> list[Memory]:
         """Low-value memories that are safe to compress.
 
         The filters here are the safety of this whole feature. A memory that
@@ -172,7 +181,6 @@ class CompactionEngine:
         summary were poor; everything that would matter is excluded before a
         single token is spent.
         """
-        config = self._settings.dream.compaction
         active = await self._repository.find(
             scope,
             statuses=[MemoryStatus.ACTIVE],
