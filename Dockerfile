@@ -20,7 +20,8 @@ RUN apt-get update \
 # Dependencies first, so a source change does not invalidate the install layer.
 COPY pyproject.toml README.md ./
 COPY app ./app
-COPY sdk ./sdk
+COPY memdream ./memdream
+COPY prompts ./prompts
 
 RUN pip install --no-cache-dir .
 
@@ -38,7 +39,8 @@ RUN useradd --create-home --uid 10001 dream \
 USER dream
 
 ENV DREAM_FAISS_PATH=/data/faiss \
-    DREAM_CONFIG_FILE=/app/config/dream.yaml
+    DREAM_CONFIG_FILE=/app/config/dream.yaml \
+    DREAM_PROMPTS_DIR=/app/prompts
 
 EXPOSE 8000
 

@@ -19,6 +19,7 @@ from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.core.metrics import metrics
 from app.core.policy import MemoryPolicy
+from app.core.prompts import PromptLibrary
 from app.dream.compaction import CompactionEngine
 from app.dream.consolidation import ConsolidationEngine
 from app.dream.engine import DreamEngine
@@ -63,6 +64,7 @@ class DreamContainer:
     retriever: MemoryRetriever
     lifecycle: MemoryLifecycle
     policy: MemoryPolicy
+    prompts: PromptLibrary
     extractor: MemoryExtractor
 
     dream_engine: DreamEngine
@@ -126,7 +128,12 @@ class DreamContainer:
         )
         lifecycle = MemoryLifecycle(memories, retriever)
         policy = MemoryPolicy(settings.memory)
-        extractor = MemoryExtractor(llm, policy=policy, settings=settings)
+        # Resolved and validated here: a deployment missing a prompt should fail
+        # while it is starting, not on the first user message.
+        prompts = PromptLibrary.from_settings(settings)
+        extractor = MemoryExtractor(
+            llm, policy=policy, settings=settings, prompts=prompts
+        )
 
         dream_engine = DreamEngine(
             llm=llm,
@@ -136,9 +143,12 @@ class DreamContainer:
             lifecycle=lifecycle,
             audit=audit,
             settings=settings,
+            prompts=prompts,
         )
         consolidation = ConsolidationEngine(memories, lifecycle, settings)
-        compaction = CompactionEngine(memories, lifecycle, llm, embeddings, settings)
+        compaction = CompactionEngine(
+            memories, lifecycle, llm, embeddings, settings, prompts=prompts
+        )
         synthesis = SynthesisEngine(
             llm=llm,
             embeddings=embeddings,
@@ -146,6 +156,7 @@ class DreamContainer:
             lifecycle=lifecycle,
             audit=audit,
             settings=settings,
+            prompts=prompts,
         )
         memory_service = MemoryService(
             repository=memories,
@@ -181,6 +192,7 @@ class DreamContainer:
             retriever=retriever,
             lifecycle=lifecycle,
             policy=policy,
+            prompts=prompts,
             extractor=extractor,
             dream_engine=dream_engine,
             synthesis=synthesis,
@@ -246,6 +258,9 @@ class DreamContainer:
         except Exception as exc:  # noqa: BLE001
             checks["queue"] = {"ok": False, "error": str(exc)[:200]}
 
+        # Which prompts are in force and where each came from. The first thing
+        # to check when a deployment behaves unlike the one next to it.
+        checks["prompts"] = {"ok": True, "sources": self.prompts.describe()}
         checks["embeddings"] = {
             "provider": self.settings.embedding_provider,
             "model": self.embeddings.model_name,

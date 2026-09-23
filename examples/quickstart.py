@@ -46,6 +46,8 @@ def heading(title: str) -> None:
 
 async def build(client_id: str = "client_demo"):
     settings = Settings(
+        # MemDream ships no prompts; these are the starter templates.
+        prompts_dir=str(Path(__file__).resolve().parent.parent / "prompts"),
         env="demo",
         identity_salt="demo-salt",
         llm_provider="fake",

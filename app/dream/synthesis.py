@@ -39,9 +39,10 @@ from app.core.metrics import (
     metrics,
     operation,
 )
+from app.core.prompts import PromptLibrary
 from app.dream.candidate_selector import CandidateSelector
 from app.dream.clustering import Cluster, cluster_memories
-from app.dream.prompts import build_synthesis_payload, synthesis_system
+from app.dream.prompts import build_synthesis_payload
 from app.memory.lifecycle import MemoryLifecycle
 from app.models.dream import DreamJob, DreamOperation, PatternProposal, SynthesisDecision
 from app.models.enums import JobStatus, MemoryStatus, MemoryType, RelationType, SynthesisAction
@@ -72,6 +73,7 @@ class SynthesisEngine:
         lifecycle: MemoryLifecycle,
         audit: AuditRepository,
         settings: Settings | None = None,
+        prompts: PromptLibrary | None = None,
     ) -> None:
         self._llm = llm
         self._embeddings = embeddings
@@ -79,6 +81,7 @@ class SynthesisEngine:
         self._lifecycle = lifecycle
         self._audit = audit
         self._settings = settings or get_settings()
+        self._prompts = prompts or PromptLibrary.from_settings(self._settings, validate=False)
         self._config = self._settings.dream.synthesis
         self._selector = CandidateSelector(repository, self._config)
 
@@ -209,7 +212,7 @@ class SynthesisEngine:
         try:
             with operation(OP_SYNTHESIZE):
                 result = await self._llm.generate_json(
-                    system=synthesis_system(self._settings.domain),
+                    system=self._prompts.get("synthesis"),
                     user=build_synthesis_payload(cluster.memories, known_patterns),
                     response_model=SynthesisDecision,
                 )

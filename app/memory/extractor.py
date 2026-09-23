@@ -15,7 +15,8 @@ from app.core.exceptions import LLMResponseError, ProviderError
 from app.core.logging import get_logger
 from app.core.metrics import EXTRACTION_SKIPPED, OP_EXTRACT, metrics, operation
 from app.core.policy import MemoryPolicy
-from app.dream.prompts import build_extraction_payload, extraction_system
+from app.core.prompts import PromptLibrary
+from app.dream.prompts import build_extraction_payload
 from app.memory.triage import skip_reason
 from app.models.dream import ExtractedMemory, ExtractionResult
 from app.models.memory import utcnow
@@ -50,10 +51,12 @@ class MemoryExtractor:
         *,
         policy: MemoryPolicy | None = None,
         settings: Settings | None = None,
+        prompts: PromptLibrary | None = None,
     ) -> None:
         self._llm = llm
         self._settings = settings or get_settings()
         self._policy = policy or MemoryPolicy(self._settings.memory)
+        self._prompts = prompts or PromptLibrary.from_settings(self._settings, validate=False)
 
     @property
     def policy(self) -> MemoryPolicy:
@@ -86,7 +89,7 @@ class MemoryExtractor:
         try:
             with operation(OP_EXTRACT):
                 result = await self._llm.generate_json(
-                    system=extraction_system(self._settings.domain),
+                    system=self._prompts.get("extraction"),
                     user=build_extraction_payload(
                         text, now=now or utcnow(), message_id=message_id
                     ),

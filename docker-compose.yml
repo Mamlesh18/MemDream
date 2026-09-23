@@ -32,6 +32,9 @@ services:
       # Synthesis runs here, in this process. Nothing else to deploy.
       DREAM_QUEUE_PROVIDER: inline
       DREAM_CONFIG_FILE: /app/config/dream.yaml
+      # The starter prompts, baked into the image. Mount your own over
+      # /app/prompts, or set this to a path you mount.
+      DREAM_PROMPTS_DIR: /app/prompts
     volumes:
       - faiss-index:/data/faiss
     depends_on:

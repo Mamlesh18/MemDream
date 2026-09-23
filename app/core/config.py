@@ -707,6 +707,19 @@ class Settings(BaseSettings):
     #     delivery details, dietary needs, dislikes, and usual orders per meal."
     domain: str = Field(default="", max_length=400)
 
+    # --- prompts ------------------------------------------------------ #
+    #
+    # MemDream ships no prompts. The engine knows how to extract, decide and
+    # synthesise; what to say to the model depends on the product, so it is
+    # configuration and a deployment without it does not start.
+    #
+    #   DREAM_PROMPTS_DIR=./prompts        a file per prompt
+    #   DREAM_PROMPTS__EXTRACTION="..."    one prompt inline, wins over the file
+    #
+    # Copy a working starter set with: python -m memdream prompts ./prompts
+    prompts_dir: str = ""
+    prompts: dict[str, str] = Field(default_factory=dict)
+
     # --- privacy ---------------------------------------------------------- #
     identity_salt: str = "dream-memory-default-salt"
 

@@ -47,6 +47,7 @@ from app.core.config import CompactionSettings, Settings, get_settings
 from app.core.exceptions import LLMResponseError, ProviderError
 from app.core.logging import get_logger
 from app.core.metrics import OP_SYNTHESIZE, operation
+from app.core.prompts import PromptLibrary
 from app.dream.clustering import cluster_memories
 from app.dream.prompts import _dumps, _memory_view
 from app.memory.lifecycle import MemoryLifecycle
@@ -59,21 +60,6 @@ from app.providers.llm.base import LLMProvider
 from app.repositories.base import MemoryRepository
 
 logger = get_logger(__name__)
-
-
-COMPACTION_SYSTEM = """\
-Fold several of a user's memories into one that says everything they say.
-
-Losing a fact is failure. Every name, number, dish, date and preference in the
-inputs must survive into the summary. Do not generalise beyond them, do not
-add anything, do not drop the unusual one because it does not fit.
-
-Write one self-contained sentence or two, third person about "User", in the
-same register as the inputs.
-
-If the memories do not belong together — different subjects, unrelated facts —
-return keep: false and no summary. Storing them separately is the right answer.\
-"""
 
 
 @dataclass(slots=True)
@@ -104,12 +90,14 @@ class CompactionEngine:
         llm: LLMProvider,
         embeddings: EmbeddingProvider,
         settings: Settings | None = None,
+        prompts: PromptLibrary | None = None,
     ) -> None:
         self._repository = repository
         self._lifecycle = lifecycle
         self._llm = llm
         self._embeddings = embeddings
         self._settings = settings or get_settings()
+        self._prompts = prompts or PromptLibrary.from_settings(self._settings, validate=False)
 
     async def run(
         self,
@@ -219,7 +207,7 @@ class CompactionEngine:
         try:
             with operation(OP_SYNTHESIZE):
                 result = await self._llm.generate_json(
-                    system=COMPACTION_SYSTEM,
+                    system=self._prompts.get("compaction"),
                     user=payload,
                     response_model=CompactionProposal,
                 )

@@ -10,6 +10,7 @@ Set ``DREAM_TEST_MONGODB_URI`` to run the same suite against a real MongoDB.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -40,6 +41,9 @@ def settings() -> Settings:
     return Settings(
         env="test",
         identity_salt="test-salt-do-not-use-in-production",
+        # MemDream ships no prompts, so the suite supplies the starter set the
+        # repository ships as templates — the same files a company copies.
+        prompts_dir=str(Path(__file__).resolve().parents[1] / "prompts"),
         llm_provider="fake",
         embedding_provider="fake",
         vector_provider="memory",

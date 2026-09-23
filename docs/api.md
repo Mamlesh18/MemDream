@@ -1319,6 +1319,7 @@ an orchestrator will not restart the service because the database blipped.
     "database": {"ok": true, "provider": "mongodb"},
     "vector_store": {"ok": true, "provider": "faiss"},
     "queue": {"ok": true, "provider": "inline", "depth": 0},
+    "prompts": {"ok": true, "sources": {"extraction": "prompts/extraction.md", "decision": "prompts/decision.md", "synthesis": "prompts/synthesis.md"}},
     "embeddings": {"provider": "azure_openai", "model": "azure_openai:text-embedding-3-small", "dimensions": 1536},
     "llm": {"provider": "azure_openai", "model": "azure_openai:gpt-4o-mini"}
   }
@@ -1331,7 +1332,10 @@ an orchestrator will not restart the service because the database blipped.
 | `degraded` | 200 | the job queue is down: background synthesis is affected, reads and writes are not. Keep the instance in rotation |
 | `degraded` | 503 | the database or vector store is down. Take the instance out of rotation |
 
-A failing check carries `"ok": false` and an `error`.
+A failing check carries `"ok": false` and an `error`. The `prompts` check names
+the prompts in force and where each was loaded from — MemDream ships none, so
+this is what a deployment is actually running. See
+[Writing your prompts](prompts.md).
 
 ## GET /v1/metrics
 

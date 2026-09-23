@@ -34,8 +34,9 @@ from app.core.metrics import (
     metrics,
     operation,
 )
+from app.core.prompts import PromptLibrary
 from app.dream.merge import MergeEngine
-from app.dream.prompts import build_decision_payload, decision_system
+from app.dream.prompts import build_decision_payload
 from app.dream.supersede import SupersedeEngine
 from app.dream.validation import ValidatedDecision, build_memory, validate_decision
 from app.memory.lifecycle import MemoryLifecycle
@@ -85,6 +86,7 @@ class DreamEngine:
         lifecycle: MemoryLifecycle,
         audit: AuditRepository,
         settings: Settings | None = None,
+        prompts: PromptLibrary | None = None,
     ) -> None:
         self._llm = llm
         self._embeddings = embeddings
@@ -94,13 +96,13 @@ class DreamEngine:
         self._audit = audit
         self._settings = settings or get_settings()
         self._dream = self._settings.dream
+        self._prompts = prompts or PromptLibrary.from_settings(self._settings, validate=False)
 
-        domain = self._settings.domain
         self.supersede_engine = SupersedeEngine(
-            llm, lifecycle, self._dream.supersede, domain=domain
+            llm, lifecycle, self._dream.supersede, prompts=self._prompts
         )
         self.merge_engine = MergeEngine(
-            llm, lifecycle, repository, self._dream.merge, domain=domain
+            llm, lifecycle, repository, self._dream.merge, prompts=self._prompts
         )
 
     # --- public API ---------------------------------------------------------------- #
@@ -292,7 +294,7 @@ class DreamEngine:
     ) -> tuple[ValidatedDecision, str, float | None, dict[str, int]]:
         with operation(OP_DECIDE):
             result = await self._llm.generate_json(
-                system=decision_system(self._settings.domain),
+                system=self._prompts.get("decision"),
                 user=build_decision_payload(candidate_view, related, now=now),
                 response_model=DreamDecision,
             )

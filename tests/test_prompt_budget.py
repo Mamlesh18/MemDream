@@ -13,13 +13,58 @@ bill.
 
 Approximating tokens as characters÷4 is crude but stable across models, and
 being wrong by 10% does not matter for a guard rail.
+
+MemDream ships no prompts, so what is measured here is the starter set in
+`prompts/` — the files a company copies and edits. The ceilings are what they
+inherit, and a template that drifts costs every deployment that started from it.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from app.dream import prompts
+from app.core.config import Settings
+from app.core.prompts import PromptLibrary
+
+TEMPLATES = Path(__file__).resolve().parents[1] / "prompts"
+
+
+def _library(domain: str = "") -> PromptLibrary:
+    return PromptLibrary.from_settings(
+        Settings(
+            env="test",
+            identity_salt="t",
+            prompts_dir=str(TEMPLATES),
+            domain=domain,
+        ),
+        validate=False,
+    )
+
+
+class _Templates:
+    """Reads like the old module, so the budgets below did not have to move."""
+
+    DEFAULT_DOMAIN = ""
+
+    def extraction_system(self, domain: str = "") -> str:
+        return _library(domain).get("extraction")
+
+    def decision_system(self, domain: str = "") -> str:
+        return _library(domain).get("decision")
+
+    def supersede_system(self, domain: str = "") -> str:
+        return _library(domain).get("supersede")
+
+    def merge_system(self, domain: str = "") -> str:
+        return _library(domain).get("merge")
+
+    def synthesis_system(self, domain: str = "") -> str:
+        return _library(domain).get("synthesis")
+
+
+prompts = _Templates()
 
 RESTAURANT = (
     "A restaurant ordering assistant. Remember contact and delivery details, "

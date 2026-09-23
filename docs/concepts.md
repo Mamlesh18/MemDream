@@ -10,6 +10,7 @@ concept here:
 | | [Python SDK](sdk.md) | [REST API](api.md) |
 |---|---|---|
 | **What it is** | `MemDream` runs the engine inside your process, or `DreamClient` calls a server | a standalone HTTP service |
+| **Prompts** | yours — [MemDream ships none](prompts.md) | yours, configured on the server |
 | **Use it when** | your agent is written in Python | any language, several services sharing one memory, or central control |
 | **Deploy** | nothing (embedded) | the MemDream service and one database — see [Self-hosting](self-hosting.md) |
 
@@ -27,7 +28,7 @@ types and exceptions, so moving from one to the other changes one line.
 5. [What happens when you remember](#what-happens-when-you-remember)
 6. [How recall ranks memories](#how-recall-ranks-memories)
 7. [Dream: synthesis and consolidation](#dream-synthesis-and-consolidation)
-8. [Describing your domain](#describing-your-domain)
+8. [Your prompts, your domain](#your-prompts-your-domain)
 
 ---
 
@@ -362,10 +363,25 @@ pointer to its summary.
 
 ---
 
-## Describing your domain
+## Your prompts, your domain
 
-`DREAM_DOMAIN` is one sentence telling the extraction and decision steps what
-your deployment is:
+MemDream ships **no prompts**. The engine knows how to extract facts, decide
+between adding and superseding, find patterns and compact old memories; what to
+say to the model is yours, because it is the part that depends on your product.
+A deployment without prompts does not start.
+
+```bash
+python -m memdream prompts ./prompts     # a working set, yours to edit
+```
+
+Everything on this page — the lifecycle, the actions, the ranking — holds
+whatever your prompts say. They decide *what* is worth remembering, not *how*
+memory behaves. See [Writing your prompts](prompts.md).
+
+### The domain line
+
+`DREAM_DOMAIN` is one sentence, substituted wherever a prompt contains
+`{domain}`, telling the extraction and decision steps what your deployment is:
 
 ```bash
 DREAM_DOMAIN="A restaurant ordering assistant. Remember contact and delivery details, dietary needs, dislikes, and usual orders per meal."
@@ -373,7 +389,8 @@ DREAM_DOMAIN="A restaurant ordering assistant. Remember contact and delivery det
 
 It costs about 30 tokens per call and is the cheapest accuracy improvement
 available: it tells the model that *"no onions"* is a standing constraint rather
-than small talk.
+than small talk — without editing the prompts themselves, which is why it exists
+alongside them.
 
 It also **narrows what gets extracted**, and a sentence that is too narrow will
 skip facts that only *imply* what you care about. A delivery-focused domain can,

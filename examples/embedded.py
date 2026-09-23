@@ -26,6 +26,10 @@ from memdream import MemDream  # noqa: E402
 
 #: Every one of these is an ordinary setting, normally read from the environment.
 OFFLINE = {
+    # MemDream ships no prompts. These are the starter templates in this
+    # repository; copy them into your own project with
+    # `python -m memdream prompts ./prompts` and edit them.
+    "prompts": str(Path(__file__).resolve().parent.parent / "prompts"),
     "llm_provider": "fake",
     "embedding_provider": "fake",
     "vector_provider": "memory",

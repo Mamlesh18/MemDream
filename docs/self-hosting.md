@@ -23,6 +23,7 @@ process.
 - [Run directly](#run-directly)
 - [Check it is working](#check-it-is-working)
 - [Configuration](#configuration)
+  - [Prompts (required)](#prompts-required)
   - [Essentials](#essentials)
   - [Database](#database)
   - [LLM and embeddings](#llm-and-embeddings)
@@ -45,6 +46,8 @@ process.
 - **An LLM and an embedding provider:** Azure OpenAI, OpenAI, Gemini, Anthropic
   (chat only), Groq (chat only), Ollama, Together, Fireworks, or any
   OpenAI-compatible endpoint
+- **Your prompts.** MemDream ships none and will not start without them; a
+  working starter set is one command away. See [Prompts](#prompts-required)
 
 ---
 
@@ -75,6 +78,7 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install .                      # or: pip install ".[gemini,anthropic]"
 
 cp .env.example .env               # set DREAM_MONGODB_URI and provider credentials
+python -m memdream prompts ./prompts   # MemDream ships no prompts; edit these
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -89,7 +93,9 @@ Optional extras: `gemini`, `anthropic`, `postgres`, `qdrant`, `pgvector`,
 curl http://localhost:8000/ready
 ```
 
-Every dependency should report `"ok": true`. Then remember and recall something:
+Every dependency should report `"ok": true`. The `prompts` check lists which
+prompts are in force and where each was loaded from — worth a look whenever one
+deployment behaves unlike another. Then remember and recall something:
 
 ```bash
 curl -X POST http://localhost:8000/v1/memories \
@@ -122,12 +128,37 @@ common setting with an explanation.
 - Well-known provider variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
   `GOOGLE_API_KEY` are read without the prefix.
 
+### Prompts (required)
+
+MemDream ships no prompts: the engine knows how to extract facts and decide
+between adding and superseding, but what to say to the model depends on your
+product. **A deployment without prompts does not start**, and the error names
+every missing prompt and how to supply it.
+
+```bash
+python -m memdream prompts ./prompts     # a working set, yours to edit
+```
+
+| Variable | |
+|---|---|
+| `DREAM_PROMPTS_DIR` | a directory holding `extraction.md`, `decision.md`, … The whole file is the prompt |
+| `DREAM_PROMPTS__EXTRACTION` | one prompt inline; beats the file. Same for `__DECISION`, `__SUPERSEDE`, `__MERGE`, `__SYNTHESIS`, `__COMPACTION` |
+
+Which prompts are required follows configuration: unified decisions (the
+default) need `extraction` and `decision`; staged mode swaps `decision` for
+`supersede` and `merge`; `synthesis` and `compaction` are asked for only when
+enabled. The Docker image bakes the starter set in at `/app/prompts`; mount your
+own over it.
+
+Treat prompts as code — review them, and version them with the service. See
+[Writing your prompts](prompts.md).
+
 ### Essentials
 
 | Variable | Default | |
 |---|---|---|
 | `DREAM_IDENTITY_SALT` | *(insecure default)* | **Set this.** Salt for deriving user ids from phone numbers. Changing it later changes every derived id, so pick a long random value once and keep it |
-| `DREAM_DOMAIN` | empty | one sentence describing your deployment, injected into extraction and decisions. See [describing your domain](concepts.md#describing-your-domain) |
+| `DREAM_DOMAIN` | empty | one sentence describing your deployment, injected into extraction and decisions. See [your prompts, your domain](concepts.md#your-prompts-your-domain) |
 | `DREAM_ENV` | `local` | free-form environment label |
 | `DREAM_LOG_LEVEL` | `INFO` | |
 | `DREAM_LOG_JSON` | `true` | structured JSON logs |
@@ -370,7 +401,8 @@ rebuilt from it.
 - [ ] `.env` and credentials kept out of version control
 - [ ] Orchestrator probes: `/health` for liveness, `/ready` for readiness
 - [ ] Database backups. The vector index does not need them
-- [ ] `DREAM_DOMAIN` tested against real user messages — check the `NOOP` reasons in the audit log
+- [ ] Prompts reviewed and versioned with the service, and tested against real user messages — check the `NOOP` reasons in the audit log
+- [ ] `DREAM_DOMAIN` set, or its `{domain}` placeholder removed from your prompts
 - [ ] `pricing` in `config/dream.yaml` set to your provider's rates
 - [ ] Decay and compaction measured with dry runs before enabling
 - [ ] `DREAM_DREAM__CONSOLIDATION__SCHEDULE_HOUR_UTC` moved to your quiet hour

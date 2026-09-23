@@ -138,6 +138,9 @@ source .venv/bin/activate       # macOS / Linux
 pip install -r requirements.txt          # or: pip install .
 cp .env.example .env                     # fill in AZURE_OPENAI_*
 
+python -m memdream prompts ./prompts     # MemDream ships no prompts; this is a
+                                         # working set to edit. See below.
+
 uvicorn app.main:app --reload
 ```
 
@@ -311,62 +314,64 @@ Every endpoint is documented at [`docs/api.md`](docs/api.md), and interactively 
 
 ## Write your own prompts
 
-**This is the highest-leverage thing you can change.** All prompt text lives in
-one file: [`app/dream/prompts.py`](app/dream/prompts.py).
+**MemDream ships no prompts.** The engine knows *how* to extract facts, decide
+between adding and superseding, find patterns and compact old memories. What to
+**say** to the model is yours, because it is the part that depends on your
+product — a memory layer for a restaurant, a bank and a support desk should
+remember different things.
 
-```
-_SUPERSEDE_RULES   (11 rules: never invent facts, additive detail ≠ contradiction…)
-_MERGE_RULES       (10 rules: never lose information, don't merge different subjects…)
-_SHARED_CLOSING    ("you recommend, you do not execute")
-        │
-        ├──► DECISION_SYSTEM      one call decides all four actions
-        ├──► SUPERSEDE_SYSTEM     focused, for staged mode
-        └──► MERGE_SYSTEM         focused, for staged mode
-
-EXTRACTION_SYSTEM  what is worth remembering  ← tune this first
-SYNTHESIS_SYSTEM   what patterns matter
+```bash
+python -m memdream prompts ./prompts     # a working set, yours to edit
+export DREAM_PROMPTS_DIR=./prompts       # or MemDream(prompts="./prompts")
 ```
 
-Editing `_SUPERSEDE_RULES` updates the unified *and* focused prompts together, so
-they cannot drift apart.
+```
+extraction.md   what is worth remembering at all    ← tune this first
+decision.md     ADD / SUPERSEDE / MERGE / NOOP for one fact
+supersede.md    SUPERSEDE or NOOP        ┐ staged decision mode only
+merge.md        MERGE or NOOP            ┘
+synthesis.md    what patterns matter
+compaction.md   how to fold a crowd of old memories into one summary
+```
 
-### Think of a prompt as three layers
+The smallest working set is two files — unified decisions need `extraction` and
+`decision`; synthesis and compaction are asked for only when enabled. A
+deployment missing one **does not start**, and the error names every missing
+prompt and three ways to supply it.
 
-| Layer | Example | Safe to change? |
+### Three layers to a prompt
+
+| Layer | Example | Who owns it |
 |---|---|---|
-| **Contract** | output JSON schema, "you propose, backend executes" | **No** — validation depends on it |
-| **Safety** | never invent facts, preserve history, never lose information | **No** — these are your data-integrity guarantees |
-| **Domain** | what matters in *your* vertical, what to ignore, examples | **Yes** — this is where to customise |
+| **Contract** | the output JSON shape | **MemDream** — appended to your prompt and validated on the way back, so you never write it |
+| **Safety** | never invent ids, preserve history, lose no detail in a merge | **Shared** — the backend enforces them and the starter prompts ask for them. Keep these |
+| **Domain** | what matters in your vertical, what to ignore, worked examples | **You** |
 
 ### Tuning for your use case
 
-Start with `EXTRACTION_SYSTEM` — it decides what is worth remembering at all, and
-that varies enormously between verticals. The same sentence means different
-things to a healthcare intake bot, a recruiting bot and a shopping assistant.
+Start with `prompts/extraction.md`. It decides what is worth remembering at all,
+and that varies enormously between verticals: the same sentence means different
+things to a healthcare intake bot, a recruiter and a shopping assistant. The
+whole file is the prompt — there is no front matter and no comment syntax:
 
-```python
-# app/dream/prompts.py
-EXTRACTION_SYSTEM = """\
-You extract durable long-term memories from a single user message.
+```markdown
+Extract durable facts about the user from one message.{domain}
 
-## Domain
-You are the memory for a healthcare intake assistant.
+Remember: symptoms, medications, allergies, appointment preferences, providers.
+Ignore: insurance claim numbers, payment details, small talk.
 
-## Remember
-symptoms, medications, allergies, appointment preferences, care providers
+One fact per memory, third person about "User", self-contained months later.
 
-## Ignore
-insurance claim numbers, payment details, small talk
-
-## Examples
-"I've been getting headaches every morning for two weeks"
-  → [symptom] "User has experienced morning headaches for two weeks."
-...
-"""
+"I have been getting headaches every morning for two weeks"
+  -> "User has experienced morning headaches for two weeks." (symptom)
 ```
 
 **Worked examples move behaviour more than instructions do.** Two or three
-input → output pairs are worth a paragraph of prose.
+input → output pairs are worth a paragraph of prose. `{domain}` anywhere in a
+prompt is replaced with your `DREAM_DOMAIN` sentence.
+
+Full guide — what each prompt receives, what it must return, and how to test a
+change: [`docs/prompts.md`](docs/prompts.md).
 
 Then tune thresholds in [`config/dream.yaml`](config/dream.yaml) — but **measure
 first**:
@@ -590,6 +595,7 @@ down by operation, and per-user at `GET /v1/dream/stats`.
 |---|---|
 | [`docs/concepts.md`](docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream — start here |
 | [`docs/sdk.md`](docs/sdk.md) | Python SDK reference, embedded and hosted |
+| [`docs/prompts.md`](docs/prompts.md) | Writing your own prompts — MemDream ships none |
 | [`docs/api.md`](docs/api.md) | REST API reference — every endpoint |
 | [`docs/self-hosting.md`](docs/self-hosting.md) | Deploying and configuring the service |
 | [`docs/diagrams.md`](docs/diagrams.md) | Architecture diagrams |

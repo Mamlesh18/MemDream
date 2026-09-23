@@ -120,17 +120,31 @@ class AsyncMemDream:
 
         Configuration comes from the environment unless you say otherwise:
 
+            llm         "openai:gpt-4o-mini", "azure:gpt-4o", "anthropic:claude-sonnet-4-5"
+            embeddings  "openai:text-embedding-3-small", optionally ":dimensions"
+            vector      "faiss:./data/faiss", "qdrant:http://localhost:6333", "memory"
+            prompts     a directory of prompt files, or {"extraction": "..."}
             settings    a fully-built `Settings`
             **overrides a shortcut for one or two fields (`llm_provider="fake"`)
-            database    an already-connected store, when you do not want the
-                        facade to open its own — a throwaway schema in a test,
-                        or a connection the surrounding app already owns
+
+        API keys are deliberately not part of the shorthand: they belong in the
+        environment (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), not in source.
+            database    a connection string, or an already-connected store
+                        when you do not want the facade to open its own — a
+                        throwaway schema in a test, or a connection the
+                        surrounding app already owns
             container   an already-built container, adopted whole. This is how a
                         FastAPI app hands its own wiring to code that wants the
                         SDK surface, and the facade will not close what it did
                         not open
         """
         _require_core()
+
+        # `database=` takes either an already-connected store or a connection
+        # string; a string is shorthand, resolved with the others below.
+        if isinstance(database, str):
+            overrides = {**overrides, "database": database}
+            database = None
 
         self._settings = settings
         self._overrides = overrides
@@ -170,14 +184,17 @@ class AsyncMemDream:
             if self._container is None:
                 from app.container import DreamContainer
                 from app.core.config import Settings, get_settings
+                from app.core.shorthand import expand
 
+                # `llm="openai:gpt-4o-mini"` and friends become the settings
+                # fields that provider actually reads; everything else passes
+                # through untouched.
+                overrides = expand(self._overrides)
                 settings = self._settings
                 if settings is None:
-                    settings = (
-                        Settings(**self._overrides) if self._overrides else get_settings()
-                    )
-                elif self._overrides:
-                    settings = settings.model_copy(update=self._overrides)
+                    settings = Settings(**overrides) if overrides else get_settings()
+                elif overrides:
+                    settings = settings.model_copy(update=overrides)
 
                 self._container = await DreamContainer.create(
                     settings, database=self._database

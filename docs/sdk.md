@@ -28,6 +28,7 @@ lifecycle explain most of what the methods below do.
 ## Contents
 
 - [Install](#install)
+- [Prompts: MemDream ships none](#prompts-memdream-ships-none)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Scope](#scope)
@@ -65,6 +66,24 @@ need no extra.
 
 ---
 
+## Prompts: MemDream ships none
+
+The engine knows how to extract facts, decide between adding and superseding and
+find patterns. What to *say* to the model is yours, because it depends on your
+product. **A deployment without prompts does not start.**
+
+Get a working set to edit:
+
+```bash
+python -m memdream prompts ./prompts
+```
+
+Then point the SDK at it — `prompts="./prompts"` below, or `DREAM_PROMPTS_DIR`.
+The smallest working set is two files, and the error names anything missing.
+Full guide: [Writing your prompts](prompts.md).
+
+---
+
 ## Quick start
 
 ### Embedded
@@ -72,7 +91,12 @@ need no extra.
 ```python
 from memdream import MemDream
 
-mem = MemDream(user_id="user_123")
+mem = MemDream(
+    user_id="user_123",
+    llm="openai:gpt-4o-mini",
+    embeddings="openai:text-embedding-3-small",
+    prompts="./prompts",          # python -m memdream prompts ./prompts
+)
 
 mem.add("Hi, I'm Priya. I live in Chennai.")
 mem.add("I'm allergic to peanuts and I always order the veg thali for lunch.")
@@ -113,7 +137,7 @@ database and model credentials.
 ```python
 from memdream import AsyncMemDream        # or AsyncDreamClient
 
-async with AsyncMemDream(user_id="user_123") as mem:
+async with AsyncMemDream(user_id="user_123", prompts="./prompts") as mem:
     await mem.add("I live in Bangalore now.")
     memories = await mem.search("where does the user live?")
 ```
@@ -137,36 +161,59 @@ mem.synthesize()            mem.dream.synthesize()
 
 *Embedded only.* A hosted client is configured by its constructor alone.
 
-The embedded SDK builds the same engine the server runs, so it is configured the
-same way: `DREAM_*` environment variables, or a `.env` file in the working
-directory. The minimum is a database and an LLM and embedding provider:
+The embedded SDK builds the same engine the server runs, so it reads the same
+`DREAM_*` environment variables or `.env` file. In code, the common choices have
+a shorthand:
+
+```python
+mem = MemDream(
+    user_id="user_123",
+    llm="openai:gpt-4o-mini",
+    embeddings="openai:text-embedding-3-small",
+    vector="faiss:./data/faiss",
+    database="mongodb://localhost:27017/memdream",
+    prompts="./prompts",
+)
+```
+
+| Shorthand | Accepts | Expands to |
+|---|---|---|
+| `llm` | `provider:model` | the chat model field that provider reads |
+| `embeddings` | `provider:model` or `provider:model:dimensions` | the embedding model and width |
+| `vector` | `provider:target` | the vector store and its path or URL |
+| `database` | a connection string | the store and its DSN |
+| `prompts` | a directory path, or `{name: text}` | `prompts_dir` or inline prompts |
+
+Providers: `openai`, `azure`, `gemini`, `anthropic` (chat only), `groq`,
+`ollama`, `together`, `fireworks`, `openai_compatible`, `fake`. Vector stores:
+`faiss`, `memory`, `qdrant`, `pgvector`, `chroma`, `pinecone`, `milvus`,
+`azure_search`. A name nobody has is an error, not a silent fallback — as is a
+misspelt keyword.
+
+**API keys stay in the environment**, so they never reach source control:
 
 ```bash
-# .env
-DREAM_MONGODB_URI=mongodb://localhost:27017
-DREAM_MONGODB_DATABASE=memdream
+OPENAI_API_KEY=sk-...
 DREAM_IDENTITY_SALT=a-long-random-string-you-never-change
+```
 
+Anything without a shorthand is an ordinary keyword, and the two mix freely:
+
+```python
+mem = MemDream(user_id="u", llm="groq:llama-3.3-70b", triage_enabled=False)
+```
+
+Or configure everything from the environment and pass nothing:
+
+```bash
+DREAM_MONGODB_URI=mongodb://localhost:27017
+DREAM_PROMPTS_DIR=./prompts
 DREAM_LLM_PROVIDER=openai
 DREAM_EMBEDDING_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ```
 
-Any setting can also be passed to the constructor, which is convenient for one
-or two values:
-
-```python
-mem = MemDream(
-    user_id="user_123",
-    llm_provider="gemini",
-    embedding_provider="gemini",
-    gemini_api_key="...",
-    domain="A restaurant ordering assistant. Remember contact and delivery details, "
-           "dietary needs, dislikes, and usual orders per meal.",
-)
-```
-
-Every setting, provider and default is listed in [Self-hosting](self-hosting.md).
+Every setting is listed in [Self-hosting](self-hosting.md).
 
 ### Try it with no infrastructure
 
@@ -181,9 +228,10 @@ from memdream import MemDream
 offline = MemDream(
     user_id="alice",
     database=MongoDatabase(AsyncMongoMockClient(tz_aware=True), "demo"),
-    llm_provider="fake",
-    embedding_provider="fake",
-    vector_provider="memory",
+    llm="fake",
+    embeddings="fake",
+    vector="memory",
+    prompts="./prompts",
     identity_salt="demo",
 )
 ```
@@ -281,9 +329,13 @@ MemDream(
     client_id: str | None = None,
     namespace: dict[str, str] | None = None,
     bot_id: str | None = None,
+    llm: str | None = None,
+    embeddings: str | None = None,
+    vector: str | None = None,
+    prompts: str | dict[str, str] | None = None,
+    database: str | Database | None = None,
     settings: Settings | None = None,
     container: DreamContainer | None = None,
-    database: Database | None = None,
     **overrides,
 )
 ```
@@ -291,10 +343,18 @@ MemDream(
 | Argument | |
 |---|---|
 | `user_id` … `bot_id` | default [scope](#scope) for every call |
+| `llm` | `"openai:gpt-4o-mini"`, `"azure:gpt-4o"`, `"anthropic:claude-sonnet-4-5"`, … |
+| `embeddings` | `"openai:text-embedding-3-small"`, optionally `":dimensions"` |
+| `vector` | `"faiss:./data/faiss"`, `"qdrant:http://localhost:6333"`, `"memory"` |
+| `prompts` | a directory of prompt files, or `{"extraction": "..."}` |
+| `database` | a connection string, or an already-connected database to use instead of opening one |
 | `settings` | a complete `app.core.config.Settings`. Default: read from the environment |
-| `**overrides` | individual settings, e.g. `llm_provider="gemini"` |
-| `database` | an already-connected database to use instead of opening one |
+| `**overrides` | any other setting, e.g. `triage_enabled=False` |
 | `container` | an already-built engine to adopt, e.g. the one your MemDream server app built. The SDK will not close what it did not open |
+
+API keys are deliberately **not** part of the shorthand: they belong in the
+environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, …),
+not in source code.
 
 Construction is cheap: connections open on the first call, or when you call
 `start()`.
@@ -882,6 +942,7 @@ except DreamAPIError as error:
 | `DreamNotFoundError` | the memory or job does not exist in this scope | 404 |
 | `DreamAuthError` | the API key is missing, invalid, or bound to a different client *(hosted)* | 401 |
 | `DreamAPIError` | anything else: editing history (409), a provider failure (502), a server error (500) | as returned |
+| `DreamAPIError` with `code="configuration_error"` | the deployment is misconfigured — most often a missing prompt. The message names what to add | 500 |
 | `DreamConnectionError` | the server could not be reached or timed out *(hosted)* | — |
 | `ValueError` | no user in scope; `purge()` without `confirm=True`; `update()` with nothing to change | — |
 | `TypeError` | an unknown keyword — usually a misspelt scope argument | — |
