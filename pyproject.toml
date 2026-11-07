@@ -28,6 +28,9 @@ dependencies = [
     "pydantic-settings>=2.3",
     "motor>=3.4",
     "pymongo>=4.7",
+    # In-process MongoDB stand-in behind `database="memory"`: try MemDream
+    # with no database server running.
+    "mongomock-motor>=0.0.29",
     "faiss-cpu>=1.8",
     "numpy>=1.26",
     "openai>=1.40",
@@ -41,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Vector backends. Each is lazily imported, so installing one costs nothing for
-# the others: pip install memdream[qdrant]
+# the others: pip install "memdream[qdrant] @ git+https://github.com/Mamlesh18/MemDream.git"
 qdrant = ["qdrant-client>=1.9"]
 pgvector = ["asyncpg>=0.29"]
 # The canonical store on Postgres. Same driver as the pgvector backend, so
@@ -68,16 +71,15 @@ dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "mongomock-motor>=0.0.29",
     "ruff>=0.5",
     "mypy>=1.10",
     "anyio>=4.4",
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/memdream"
-Documentation = "https://github.com/your-org/memdream/tree/main/docs"
-Issues = "https://github.com/your-org/memdream/issues"
+Homepage = "https://github.com/Mamlesh18/MemDream"
+Documentation = "https://github.com/Mamlesh18/MemDream/tree/main/docs"
+Issues = "https://github.com/Mamlesh18/MemDream/issues"
 
 [project.scripts]
 memdream-eval = "eval.run:main"

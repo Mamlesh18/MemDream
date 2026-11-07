@@ -69,7 +69,7 @@ SCOPE_KEYS = ("user_id", "phone_number", "agent_id", "client_id", "namespace", "
 #: too; `tests/test_sdk_parity.py` holds all four classes to it, signatures
 #: included.
 MEMORY_OPERATIONS = (
-    "add", "create", "update", "forget", "purge",
+    "add", "create", "update", "forget", "delete", "purge",
     "search", "get", "list", "history", "audit",
 )
 DREAM_OPERATIONS = ("synthesize", "get_job", "list_jobs", "stats", "consolidate")
@@ -345,6 +345,13 @@ class _Operations:
             params=self._query(scope, {"permanent": "true" if permanent else "false"}),
         )
 
+    def delete(self, memory_id: str, **scope: Any) -> _Call:
+        """Erase a memory for good: the row and every edge touching it.
+
+        Shorthand for `forget(memory_id, permanent=True)`. Cannot be undone.
+        """
+        return self.forget(memory_id, permanent=True, **scope)
+
     def purge(self, *, confirm: bool = False, **scope: Any) -> _Call:
         """Erase everything for one user, audit trail included. Irreversible.
 
@@ -565,6 +572,7 @@ _RETURNS: dict[str, Any] = {
     "create": MemoryDetail,
     "update": MemoryDetail,
     "forget": dict[str, Any],
+    "delete": dict[str, Any],
     "purge": dict[str, Any],
     "search": SearchResult,
     "get": MemoryDetail,

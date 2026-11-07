@@ -84,7 +84,8 @@ def _require_core() -> None:
     except ImportError as exc:  # pragma: no cover - depends on install shape
         raise ImportError(
             "The embedded MemDream runs the engine in your process, so it needs "
-            "the whole package: pip install memdream\n"
+            "the whole package: "
+            "pip install 'memdream @ git+https://github.com/Mamlesh18/MemDream.git'\n"
             "To talk to a MemDream server over HTTP instead, use DreamClient, "
             "which needs only httpx."
         ) from exc
@@ -114,6 +115,7 @@ class AsyncMemDream:
         settings: Settings | None = None,
         container: DreamContainer | None = None,
         database: Any = None,
+        auto_dream: bool = True,
         **overrides: Any,
     ) -> None:
         """Scope defaults are set once here and omitted from every call.
@@ -124,27 +126,44 @@ class AsyncMemDream:
             embeddings  "openai:text-embedding-3-small", optionally ":dimensions"
             vector      "faiss:./data/faiss", "qdrant:http://localhost:6333", "memory"
             prompts     a directory of prompt files, or {"extraction": "..."}
+            database    "mongodb://...", "postgresql://...", or "memory" for an
+                        in-process store that needs no server (and keeps
+                        nothing after the process exits). An already-connected
+                        store works too — a throwaway schema in a test, or a
+                        connection the surrounding app already owns
+            auto_dream  True (default): Dream runs on its own. Synthesis fires
+                        once a user has accumulated enough new memories, and a
+                        daily pass retires memories that are no longer true.
+                        False: nothing runs unless you call `synthesize()` or
+                        `consolidate()` yourself
             settings    a fully-built `Settings`
-            **overrides a shortcut for one or two fields (`llm_provider="fake"`)
-
-        API keys are deliberately not part of the shorthand: they belong in the
-        environment (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), not in source.
-            database    a connection string, or an already-connected store
-                        when you do not want the facade to open its own — a
-                        throwaway schema in a test, or a connection the
-                        surrounding app already owns
             container   an already-built container, adopted whole. This is how a
                         FastAPI app hands its own wiring to code that wants the
                         SDK surface, and the facade will not close what it did
                         not open
+            **overrides a shortcut for one or two fields (`llm_provider="fake"`)
+
+        API keys are deliberately not part of the shorthand: they belong in the
+        environment (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...), not in source.
         """
         _require_core()
+
+        # `database="memory"`: an in-process store. Built in `start()`, on the
+        # loop that will use it. The vector index follows it into memory unless
+        # told otherwise — a FAISS index on disk would outlive the rows it
+        # indexes and be stale on the next run.
+        self._in_memory = database == "memory"
+        if self._in_memory:
+            database = None
+            if "vector" not in overrides and "vector_provider" not in overrides:
+                overrides = {**overrides, "vector_provider": "memory"}
 
         # `database=` takes either an already-connected store or a connection
         # string; a string is shorthand, resolved with the others below.
         if isinstance(database, str):
             overrides = {**overrides, "database": database}
             database = None
+        self._auto_dream = auto_dream
 
         self._settings = settings
         self._overrides = overrides
@@ -190,19 +209,53 @@ class AsyncMemDream:
                 # fields that provider actually reads; everything else passes
                 # through untouched.
                 overrides = expand(self._overrides)
+
+                # Quiet by default: a library should not print INFO lines into
+                # the program that imported it. `log_level="INFO"` turns them on.
+                if self._owns_container:
+                    from app.core.logging import configure_library_logging
+
+                    configure_library_logging(
+                        self._overrides.get("log_level")
+                        or (self._settings.log_level if self._settings else None)
+                        or "WARNING"
+                    )
+
                 settings = self._settings
                 if settings is None:
                     settings = Settings(**overrides) if overrides else get_settings()
                 elif overrides:
                     settings = settings.model_copy(update=overrides)
 
-                self._container = await DreamContainer.create(
-                    settings, database=self._database
-                )
+                database = self._database
+                if self._in_memory:
+                    from mongomock_motor import AsyncMongoMockClient
+
+                    from app.repositories.mongo import MongoDatabase
+
+                    database = MongoDatabase(
+                        AsyncMongoMockClient(tz_aware=True), settings.mongodb_database
+                    )
+
+                container = await DreamContainer.create(settings, database=database)
+
+                # The same daily clock the API server runs. Without it a library
+                # user would get synthesis (triggered by writes) but never the
+                # pass that retires memories whose validity has run out.
+                if self._auto_dream and self._owns_container and container.scheduler is None:
+                    from app.dream.scheduler import ConsolidationScheduler
+
+                    container.scheduler = ConsolidationScheduler(container, settings)
+                    container.scheduler.start()
+
+                self._container = container
         return self._container
 
     async def close(self) -> None:
         if self._container is not None and self._owns_container:
+            if self._container.scheduler is not None:
+                await self._container.scheduler.stop()
+                self._container.scheduler = None
             await self._container.close()
         self._container = None
 
@@ -308,7 +361,8 @@ class AsyncMemDream:
         # Synthesis fires on accumulated material rather than a timer, exactly as
         # the HTTP route does — otherwise an embedded deployment would never
         # produce patterns at all.
-        await container.dream_service.maybe_trigger(scope)
+        if self._auto_dream:
+            await container.dream_service.maybe_trigger(scope)
 
         primary = outcome.primary
         return AddResult.from_dict(
@@ -424,6 +478,14 @@ class AsyncMemDream:
             "result": "deleted" if permanent else "expired",
             "permanent": permanent,
         }
+
+    async def delete(self, memory_id: str, **scope_kwargs: Any) -> dict[str, Any]:
+        """Erase a memory for good: the row and every edge touching it.
+
+        Shorthand for `forget(memory_id, permanent=True)`. Cannot be undone —
+        use `forget(memory_id)` when you only want it out of search results.
+        """
+        return await self.forget(memory_id, permanent=True, **scope_kwargs)
 
     async def purge(self, *, confirm: bool = False, **scope_kwargs: Any) -> dict[str, Any]:
         """Erase everything for one user: memories, edges, audit trail, jobs.
@@ -793,6 +855,7 @@ class MemDream:
         "create",
         "update",
         "forget",
+        "delete",
         "purge",
         "search",
         "get",

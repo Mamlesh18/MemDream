@@ -49,6 +49,35 @@ def _context_processor(
     return event_dict
 
 
+def configure_library_logging(level: str = "WARNING") -> None:
+    """Logging for MemDream used as a library inside someone else's program.
+
+    Unlike `configure_logging`, this leaves the stdlib root logger alone — it is
+    the host application's, not ours — and writes to stderr so nothing lands in
+    the program's own output. If the host has already configured structlog, it
+    is left exactly as the host set it up.
+    """
+    global _configured
+    if _configured or structlog.is_configured():
+        return
+
+    numeric_level = getattr(logging, level.upper(), logging.WARNING)
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            _context_processor,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        cache_logger_on_first_use=True,
+    )
+    _configured = True
+
+
 def configure_logging(level: str = "INFO", json_output: bool = True) -> None:
     """Configure structlog and the stdlib root logger. Idempotent."""
     global _configured

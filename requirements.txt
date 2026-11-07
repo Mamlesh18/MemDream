@@ -23,6 +23,8 @@ python-dotenv>=1.0
 # --- MongoDB: canonical store ------------------------------------------------
 motor>=3.4
 pymongo>=4.7
+# In-process stand-in behind `database="memory"` — no server needed.
+mongomock-motor>=0.0.29
 
 # --- FAISS: vector index -----------------------------------------------------
 # faiss-cpu ships manylinux/macOS/Windows wheels. On Linux it needs libgomp1 at
