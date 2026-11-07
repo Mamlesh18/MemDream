@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Mamlesh18/MemDream/security/advisories/new
+    about: Please report security problems privately, not as a public issue.
+  - name: Documentation
+    url: https://github.com/Mamlesh18/MemDream/blob/main/docs/sdk.md
+    about: Every method and argument of the MemDream SDK.

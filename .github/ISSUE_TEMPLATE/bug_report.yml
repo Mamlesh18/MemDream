@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in MemDream does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems go through
+        [private reporting](https://github.com/Mamlesh18/MemDream/security/advisories/new), not here.**
+        Please remove personal data from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      placeholder: |
+        I added "I moved to Bangalore" after "I live in Chennai" and got ADD instead of SUPERSEDE.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A short script is best. `database="memory"` with `llm="fake"` and `embeddings="fake"` reproduces most engine bugs with no keys.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: audit
+    attributes:
+      label: Audit rows or logs
+      description: "`mem.audit()` shows why each decision was made — NOOPs included. Run with `log_level=\"INFO\"` for logs."
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: MemDream version or commit
+      placeholder: v0.1.0, or a commit hash
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How are you using it?
+      options:
+        - Library (MemDream / AsyncMemDream)
+        - HTTP service (DreamClient / REST)
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Providers and storage
+      placeholder: "llm=openai:gpt-4o-mini, embeddings=openai:text-embedding-3-small, database=postgresql, vector=faiss"
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: 3.12 on Ubuntu 24.04

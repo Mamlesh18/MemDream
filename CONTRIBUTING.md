@@ -8,8 +8,8 @@ for in a change, and the few invariants that are not negotiable.
 ## Getting set up
 
 ```bash
-git clone https://github.com/your-org/memdream.git
-cd memdream
+git clone https://github.com/Mamlesh18/MemDream.git
+cd MemDream
 
 python -m venv .venv
 source .venv/bin/activate       # Windows: .venv\Scripts\activate
@@ -206,8 +206,9 @@ for it.
 ### Security issues
 
 Please do **not** open a public issue for anything involving cross-tenant data
-access, credential exposure, or prompt injection that escapes a scope. Email the
-maintainers instead so it can be fixed before it is described publicly.
+access, credential exposure, or prompt injection that escapes a scope. Report it
+privately as described in [SECURITY.md](SECURITY.md), so it can be fixed before
+it is described publicly.
 
 ---
 
@@ -219,6 +220,8 @@ in a second language, or both.
 
 Behaviour that makes people not want to participate — harassment, personal
 attacks, sustained dismissiveness — is not welcome, and maintainers will act on it.
+The full policy, and how to report a problem, is in
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ---
 
