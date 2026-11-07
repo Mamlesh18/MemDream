@@ -49,8 +49,11 @@ true. You do not have to schedule anything.
 MemDream is installed from GitHub (it is not on PyPI):
 
 ```bash
-pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git"
+pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git@v0.1.0"
 ```
+
+Pin a release tag (as above) in anything that matters; without `@v0.1.0` you get
+whatever is on `main` today. Releases and upgrade notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 Add extras for the providers you use:
 

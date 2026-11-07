@@ -54,8 +54,11 @@ lifecycle explain most of what the methods below do.
 MemDream is installed from GitHub:
 
 ```bash
-pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git"
+pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git@v0.1.0"
 ```
+
+Pin a release tag; without one you get whatever is on `main`. See the
+[changelog](../CHANGELOG.md).
 
 With optional providers:
 
