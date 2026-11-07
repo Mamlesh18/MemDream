@@ -44,7 +44,7 @@ process.
 - **A database:** MongoDB 6 or newer. PostgreSQL is also supported — see
   [Database](#database)
 - **An LLM and an embedding provider:** Azure OpenAI, OpenAI, Gemini, Anthropic
-  (chat only), Groq (chat only), Ollama, Together, Fireworks, or any
+  (chat only), Ollama, Together, Fireworks, or any
   OpenAI-compatible endpoint
 - **Your prompts.** MemDream ships none and will not start without them; a
   working starter set is one command away. See [Prompts](#prompts-required)
@@ -189,7 +189,7 @@ embeddings.
 
 | Variable | Values |
 |---|---|
-| `DREAM_LLM_PROVIDER` | `azure_openai`, `openai`, `gemini`, `anthropic`, `groq`, `ollama`, `together`, `fireworks`, `openai_compatible`, `fake` |
+| `DREAM_LLM_PROVIDER` | `azure_openai`, `openai`, `gemini`, `anthropic`, `ollama`, `together`, `fireworks`, `openai_compatible`, `fake` |
 | `DREAM_EMBEDDING_PROVIDER` | `azure_openai`, `openai`, `gemini`, `ollama`, `openai_compatible`, `fake` |
 
 `fake` is a deterministic offline provider for tests and demos.
@@ -207,7 +207,7 @@ AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_EMBEDDING_DIMENSIONS=1536
 ```
 
-**OpenAI, Groq, Ollama, Together, Fireworks, or your own endpoint**
+**OpenAI, Ollama, Together, Fireworks, or your own endpoint**
 
 ```bash
 DREAM_LLM_PROVIDER=openai
@@ -216,10 +216,6 @@ OPENAI_API_KEY=sk-...               # or DREAM_OPENAI_API_KEY
 DREAM_OPENAI_CHAT_MODEL=            # blank: the provider's default
 DREAM_OPENAI_EMBEDDING_MODEL=
 DREAM_OPENAI_EMBEDDING_DIMENSIONS=0
-
-# Groq for chat, OpenAI for embeddings
-DREAM_LLM_PROVIDER=groq             GROQ_API_KEY=gsk_...
-DREAM_EMBEDDING_PROVIDER=openai     OPENAI_API_KEY=sk-...
 
 # Fully local, no key, no per-token cost
 DREAM_LLM_PROVIDER=ollama

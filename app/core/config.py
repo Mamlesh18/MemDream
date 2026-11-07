@@ -555,10 +555,10 @@ class Settings(BaseSettings):
     # --- providers -------------------------------------------------------- #
     #
     # LLM and embeddings are chosen independently on purpose: several services
-    # do chat but not embeddings (Groq, Anthropic), so "Groq for chat, OpenAI
-    # for embeddings" is a normal and common pairing.
+    # do chat but not embeddings (Anthropic, Fireworks), so "Claude for chat,
+    # OpenAI for embeddings" is a normal and common pairing.
     llm_provider: Literal[
-        "azure_openai", "openai", "groq", "ollama", "together", "fireworks",
+        "azure_openai", "openai", "ollama", "together", "fireworks",
         "openai_compatible", "gemini", "anthropic", "fake",
     ] = "azure_openai"
     embedding_provider: Literal[
@@ -628,7 +628,7 @@ class Settings(BaseSettings):
 
     # --- OpenAI-compatible endpoints -------------------------------------- #
     #
-    # Shared by openai / groq / ollama / together / fireworks. Leave blank to
+    # Shared by openai / ollama / together / fireworks. Leave blank to
     # accept the preset for the chosen provider; set to override. The
     # unprefixed OPENAI_API_KEY is also read, since that is what everyone
     # already has exported.

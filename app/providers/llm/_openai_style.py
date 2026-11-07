@@ -1,6 +1,6 @@
 """Shared implementation for every provider that speaks the OpenAI wire format.
 
-Azure OpenAI, OpenAI, Groq, Ollama, Together, Fireworks and most hosted
+Azure OpenAI, OpenAI, Ollama, Together, Fireworks and most hosted
 inference services expose the same `chat/completions` shape. Only two things
 differ between them: how the client is constructed, and what the model is called.
 
@@ -90,7 +90,7 @@ class OpenAIStyleLLMProvider(LLMProvider):
     ) -> None:
         self._client = client
         self._model = model
-        #: Used in metric labels and error messages, e.g. "groq", "azure_openai".
+        #: Used in metric labels and error messages, e.g. "ollama", "azure_openai".
         self._label = label
         self._settings = settings or LLMSettings()
         # Negotiated at runtime: an endpoint that rejects `response_format` has

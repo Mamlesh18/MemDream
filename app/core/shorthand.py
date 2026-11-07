@@ -47,7 +47,6 @@ ALIASES: dict[str, str] = {
 #: OpenAI wire format shares one set of fields.
 LLM_MODEL_FIELD: dict[str, str] = {
     "openai": "openai_chat_model",
-    "groq": "openai_chat_model",
     "ollama": "openai_chat_model",
     "together": "openai_chat_model",
     "fireworks": "openai_chat_model",

@@ -1,12 +1,12 @@
-"""OpenAI, Groq, Ollama, Together, Fireworks — and anything else OpenAI-shaped.
+"""OpenAI, Ollama, Together, Fireworks — and anything else OpenAI-shaped.
 
-These are not five integrations. They are one integration with five base URLs.
+These are not four integrations. They are one integration with four base URLs.
 Every service here implements the same `chat/completions` contract, so the only
 thing that varies is where to send the request, which model to name, and where
 the API key lives.
 
-That is what the preset table below is: a lookup so `DREAM_LLM_PROVIDER=groq`
-works without the operator having to know Groq's URL. Point `base_url` at
+That is what the preset table below is: a lookup so `DREAM_LLM_PROVIDER=together`
+works without the operator having to know Together's URL. Point `base_url` at
 anything else OpenAI-shaped and it works too, named or not.
 
 Ollama matters disproportionately here: it means MemDream runs fully local, with
@@ -32,7 +32,7 @@ class Preset:
     base_url: str
     chat_model: str
     #: Conventional environment variable, so an operator who has already exported
-    #: OPENAI_API_KEY or GROQ_API_KEY does not have to re-declare it.
+    #: OPENAI_API_KEY or TOGETHER_API_KEY does not have to re-declare it.
     api_key_env: str | None
     #: Locally hosted runtimes accept any placeholder key.
     requires_key: bool = True
@@ -48,11 +48,6 @@ PRESETS: dict[str, Preset] = {
         base_url="https://api.openai.com/v1",
         chat_model="gpt-4o-mini",
         api_key_env="OPENAI_API_KEY",
-    ),
-    "groq": Preset(
-        base_url="https://api.groq.com/openai/v1",
-        chat_model="llama-3.3-70b-versatile",
-        api_key_env="GROQ_API_KEY",
     ),
     "ollama": Preset(
         base_url="http://localhost:11434/v1",

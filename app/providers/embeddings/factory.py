@@ -15,7 +15,7 @@ def build_embedding_provider(settings: Settings | None = None) -> EmbeddingProvi
 
         return from_settings(settings)
 
-    if name in ("openai", "ollama", "openai_compatible", "groq", "fireworks", "anthropic"):
+    if name in ("openai", "ollama", "openai_compatible", "fireworks", "anthropic"):
         from app.providers.embeddings.openai_compatible import from_settings
 
         return from_settings(settings, name)

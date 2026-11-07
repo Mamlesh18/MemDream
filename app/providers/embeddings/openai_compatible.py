@@ -1,14 +1,13 @@
 """Embeddings from OpenAI, Ollama, or any OpenAI-compatible endpoint.
 
 Same one-integration-many-services reasoning as the LLM counterpart, with one
-important difference: **not every chat provider does embeddings.** Groq and
-Fireworks serve inference only. Rather than fail with a confusing 404 at the
+important difference: **not every chat provider does embeddings.** Fireworks
+and Anthropic serve inference only. Rather than fail with a confusing 404 at the
 first write, those presets are absent here and the factory says so plainly.
 
 That asymmetry is why LLM and embedding providers are configured separately —
-`DREAM_LLM_PROVIDER=groq` with `DREAM_EMBEDDING_PROVIDER=openai` is a perfectly
-normal combination, and a common one, since Groq is fast and cheap for chat
-while embeddings come from elsewhere.
+`DREAM_LLM_PROVIDER=anthropic` with `DREAM_EMBEDDING_PROVIDER=openai` is a
+perfectly normal combination.
 """
 
 from __future__ import annotations
@@ -57,7 +56,6 @@ PRESETS: dict[str, EmbeddingPreset] = {
 #: Chat-only services. Naming them explicitly turns a puzzling 404 on the first
 #: write into a clear message at startup.
 INFERENCE_ONLY = {
-    "groq": "Groq serves chat only and has no embeddings endpoint",
     "fireworks": "Fireworks embedding support varies by account",
     "anthropic": "Anthropic does not offer an embeddings API",
 }

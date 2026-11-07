@@ -33,7 +33,7 @@ faiss-cpu>=1.8
 numpy>=1.26
 
 # --- providers ---------------------------------------------------------------
-# One package covers OpenAI, Azure OpenAI, Groq, Ollama, Together, Fireworks and
+# One package covers OpenAI, Azure OpenAI, Ollama, Together, Fireworks and
 # any other endpoint speaking the OpenAI wire format.
 openai>=1.40
 httpx>=0.27

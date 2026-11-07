@@ -58,7 +58,7 @@ pip install "memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git
 pip install "memdream[gemini,postgres] @ git+https://github.com/Mamlesh18/MemDream.git"     # several at once
 ```
 
-Python 3.10+. OpenAI, Azure OpenAI, Groq, Ollama, Together and Fireworks need no extra.
+Python 3.10+. OpenAI, Azure OpenAI, Ollama, Together and Fireworks need no extra.
 
 ---
 
@@ -286,7 +286,7 @@ Pick each piece in the constructor. API keys always come from the environment.
 ```python
 MemDream(
     user_id="alice",
-    llm="anthropic:claude-sonnet-4-5",          # or "openai:...", "azure:...", "gemini:...", "groq:...", "ollama:..."
+    llm="anthropic:claude-sonnet-4-5",          # or "openai:...", "azure:...", "gemini:...", "ollama:..."
     embeddings="openai:text-embedding-3-small", # or "gemini:...", "ollama:...", "azure:..."
     database="postgresql://localhost/memdream", # or "mongodb://...", or "memory"
     vector="faiss:./data/faiss",                # the default; or "qdrant:http://...", "memory", ...
@@ -296,12 +296,12 @@ MemDream(
 
 | Piece | Options | Key from |
 |---|---|---|
-| LLM | OpenAI · Azure OpenAI · Anthropic · Gemini · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`, `AZURE_OPENAI_*` |
+| LLM | OpenAI · Azure OpenAI · Anthropic · Gemini · Ollama · Together · Fireworks · any OpenAI-compatible endpoint | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `AZURE_OPENAI_*` |
 | Embeddings | OpenAI · Azure OpenAI · Gemini · Ollama · any OpenAI-compatible endpoint | same |
 | Database | `memory` (no server, for trying it) · MongoDB · PostgreSQL | — |
 | Vector index | FAISS (default, local files) · in-memory · Qdrant · pgvector · Chroma · Pinecone · Milvus · Azure AI Search | — |
 
-Anthropic and Groq have no embeddings API, so pair them with another embedder.
+Anthropic has no embeddings API, so pair it with another embedder.
 Ollama gives a fully local setup with no key and no per-token cost.
 
 The same settings can come from environment variables instead of code

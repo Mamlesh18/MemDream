@@ -1,4 +1,4 @@
-"""OpenAI-compatible providers: OpenAI, Groq, Ollama, Together, Fireworks.
+"""OpenAI-compatible providers: OpenAI, Ollama, Together, Fireworks.
 
 These are one integration with several base URLs, not several integrations. The
 tests below are mostly about *configuration resolution* — picking the right URL,
@@ -38,7 +38,6 @@ def _settings(**overrides) -> Settings:
     ("provider", "expected_host"),
     [
         ("openai", "api.openai.com"),
-        ("groq", "api.groq.com"),
         ("ollama", "localhost:11434"),
         ("together", "api.together.xyz"),
         ("fireworks", "api.fireworks.ai"),
@@ -71,23 +70,26 @@ async def test_ollama_needs_no_api_key():
 
 async def test_conventional_env_var_is_picked_up(monkeypatch):
     """Someone who already exported OPENAI_API_KEY should not have to redeclare it."""
-    monkeypatch.setenv("GROQ_API_KEY", "gsk-from-environment")
-    _, _, api_key, _ = resolve("groq", _settings(openai_api_key=""))
-    assert api_key == "gsk-from-environment"
+    monkeypatch.setenv("TOGETHER_API_KEY", "tg-from-environment")
+    _, _, api_key, _ = resolve("together", _settings(openai_api_key=""))
+    assert api_key == "tg-from-environment"
 
 
 async def test_explicit_key_beats_the_environment(monkeypatch):
-    monkeypatch.setenv("GROQ_API_KEY", "gsk-from-environment")
-    _, _, api_key, _ = resolve("groq", _settings(openai_api_key="sk-explicit"))
+    monkeypatch.setenv("TOGETHER_API_KEY", "tg-from-environment")
+    _, _, api_key, _ = resolve("together", _settings(openai_api_key="sk-explicit"))
     assert api_key == "sk-explicit"
 
 
-async def test_missing_key_names_the_variable_and_the_local_alternative():
+async def test_missing_key_names_the_variable_and_the_local_alternative(monkeypatch):
+    # Cleared explicitly: a key exported in the developer's own shell must not
+    # decide whether this test passes.
+    monkeypatch.delenv("TOGETHER_API_KEY", raising=False)
     with pytest.raises(ProviderError) as exc:
-        resolve("groq", _settings(openai_api_key=""))
+        resolve("together", _settings(openai_api_key=""))
 
     message = str(exc.value)
-    assert "GROQ_API_KEY" in message
+    assert "TOGETHER_API_KEY" in message
     # An actionable error points at the way out, not just the problem.
     assert "ollama" in message
 
@@ -127,9 +129,9 @@ async def test_inference_only_services_reject_embeddings_clearly(provider):
 
 
 async def test_llm_and_embedding_providers_are_independent():
-    """Groq for chat with OpenAI for embeddings is a normal pairing."""
-    settings = _settings(llm_provider="groq", embedding_provider="openai")
-    assert settings.llm_provider == "groq"
+    """Claude for chat with OpenAI for embeddings is a normal pairing."""
+    settings = _settings(llm_provider="anthropic", embedding_provider="openai")
+    assert settings.llm_provider == "anthropic"
     assert settings.embedding_provider == "openai"
 
 
@@ -142,13 +144,13 @@ async def test_provider_reports_a_label_that_identifies_the_service():
     from app.providers.llm.openai_compatible import OpenAICompatibleLLMProvider
 
     provider = OpenAICompatibleLLMProvider(
-        base_url="https://api.groq.com/openai/v1",
-        api_key="gsk-test",
-        model="llama-3.3-70b-versatile",
-        label="groq",
+        base_url="https://api.together.xyz/v1",
+        api_key="tg-test",
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        label="together",
     )
     # Metrics, audit rows and logs all key off this.
-    assert provider.model_name == "groq:llama-3.3-70b-versatile"
+    assert provider.model_name == "together:meta-llama/Llama-3.3-70B-Instruct-Turbo"
     await provider.close()
 
 

@@ -65,7 +65,7 @@ pip install "memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git
 pip install "memdream[postgres] @ git+https://github.com/Mamlesh18/MemDream.git"     # PostgreSQL
 ```
 
-Python 3.10 or newer. OpenAI, Azure OpenAI, Groq, Ollama, Together and Fireworks
+Python 3.10 or newer. OpenAI, Azure OpenAI, Ollama, Together and Fireworks
 need no extra.
 
 ---
@@ -188,7 +188,7 @@ mem = MemDream(
 | `database` | a connection string | the store and its DSN |
 | `prompts` | a directory path, or `{name: text}` | `prompts_dir` or inline prompts |
 
-Providers: `openai`, `azure`, `gemini`, `anthropic` (chat only), `groq`,
+Providers: `openai`, `azure`, `gemini`, `anthropic` (chat only),
 `ollama`, `together`, `fireworks`, `openai_compatible`, `fake`. Vector stores:
 `faiss`, `memory`, `qdrant`, `pgvector`, `chroma`, `pinecone`, `milvus`,
 `azure_search`. A name nobody has is an error, not a silent fallback — as is a
@@ -204,7 +204,7 @@ DREAM_IDENTITY_SALT=a-long-random-string-you-never-change
 Anything without a shorthand is an ordinary keyword, and the two mix freely:
 
 ```python
-mem = MemDream(user_id="u", llm="groq:llama-3.3-70b", triage_enabled=False)
+mem = MemDream(user_id="u", llm="ollama:llama3.2", triage_enabled=False)
 ```
 
 Or configure everything from the environment and pass nothing:
