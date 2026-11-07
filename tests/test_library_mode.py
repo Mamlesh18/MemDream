@@ -98,3 +98,23 @@ async def test_an_adopted_container_gets_no_scheduler_from_the_facade(container)
     await mem.start()
     assert container.scheduler is None
     await mem.close()
+
+
+def test_delete_leaves_no_trace_of_the_content_in_the_audit_log():
+    """An erasure request is not met while the audit log still holds the text."""
+    with MemDream(user_id="alice", database="memory", **OFFLINE) as mem:
+        added = mem.add("I live in Chennai.", raw=True)
+        kept = mem.add("I am allergic to peanuts.", raw=True)
+
+        mem.delete(added.memory_id)
+
+        rows = mem.audit()
+        assert rows, "the decisions are still recorded"
+        dumped = repr(rows)
+        assert "Chennai" not in dumped
+        # Only rows about the erased memory are redacted.
+        assert "peanuts" in dumped
+
+        delete_rows = [row for row in rows if row["action"] == "DELETE"]
+        assert delete_rows and delete_rows[0]["inputContent"] is None
+        assert kept.memory_id

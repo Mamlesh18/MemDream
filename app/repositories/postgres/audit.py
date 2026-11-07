@@ -14,7 +14,7 @@ from typing import Any
 from app.core.logging import get_logger
 from app.models.dream import DreamOperation
 from app.models.scope import MemoryScope
-from app.repositories.base import AuditRepository
+from app.repositories.base import REDACTED_REASON, AuditRepository
 from app.repositories.postgres._sql import Filter, from_row, insert_sql, to_row
 from app.repositories.postgres.database import OPERATIONS, PostgresDatabase
 
@@ -107,6 +107,17 @@ class PostgresAuditRepository(AuditRepository):
             limit,
         )
         return [from_row(record, DreamOperation) for record in records]
+
+    async def redact_for_memory(self, scope: MemoryScope, memory_id: str) -> int:
+        status = await self._pool.execute(
+            f"UPDATE {OPERATIONS} SET input_content = NULL, reason = $3 "
+            "WHERE scope_key = $1 AND (memory_id = $2 OR $2 = ANY(target_memory_ids))",
+            scope.scope_key,
+            memory_id,
+            REDACTED_REASON,
+        )
+        # asyncpg reports "UPDATE <n>".
+        return int(status.split()[-1]) if status else 0
 
     async def list_for_job(self, job_id: str, limit: int = 500) -> list[DreamOperation]:
         records = await self._pool.fetch(

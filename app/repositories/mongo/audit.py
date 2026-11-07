@@ -18,7 +18,7 @@ from pymongo import DESCENDING
 from app.core.logging import get_logger
 from app.models.dream import DreamOperation
 from app.models.scope import MemoryScope
-from app.repositories.base import AuditRepository
+from app.repositories.base import REDACTED_REASON, AuditRepository
 from app.repositories.mongo.database import MongoDatabase
 
 logger = get_logger(__name__)
@@ -77,6 +77,16 @@ class MongoAuditRepository(AuditRepository):
             .limit(limit)
         )
         return [DreamOperation.from_document(doc) async for doc in cursor]
+
+    async def redact_for_memory(self, scope: MemoryScope, memory_id: str) -> int:
+        result = await self._db.operations.update_many(
+            {
+                **scope.as_filter(),
+                "$or": [{"memoryId": memory_id}, {"targetMemoryIds": memory_id}],
+            },
+            {"$set": {"inputContent": None, "reason": REDACTED_REASON}},
+        )
+        return result.modified_count
 
     async def list_for_job(self, job_id: str, limit: int = 500) -> list[DreamOperation]:
         cursor = (

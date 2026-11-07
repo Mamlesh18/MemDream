@@ -342,12 +342,16 @@ class MemoryService:
 
         if permanent:
             await self._lifecycle.destroy(scope, [memory_id])
+            # Erasure has to reach the audit log too: earlier rows hold the
+            # verbatim message the memory came from. And the DELETE row itself
+            # records only the id — writing the content here would keep alive
+            # exactly what the caller asked to be erased.
+            await self._audit.redact_for_memory(scope, memory_id)
             await self._record_manual(
                 scope,
                 action="DELETE",
                 memory_id=memory_id,
                 reason="memory permanently erased on request",
-                input_content=memory.content,
                 request_id=request_id,
             )
             return None, True

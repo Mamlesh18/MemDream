@@ -330,6 +330,10 @@ class MemoryRepository(ABC):
         """
 
 
+#: What `reason` reads after a permanent erasure redacted the row.
+REDACTED_REASON = "[redacted: memory permanently erased]"
+
+
 class AuditRepository(ABC):
     """Persistence for the Dream audit log.
 
@@ -366,6 +370,17 @@ class AuditRepository(ABC):
 
     @abstractmethod
     async def list_for_job(self, job_id: str, limit: int = 500) -> list[DreamOperation]: ...
+
+    @abstractmethod
+    async def redact_for_memory(self, scope: MemoryScope, memory_id: str) -> int:
+        """Blank the text on every audit row in `scope` that references a memory.
+
+        Called when a memory is permanently erased. `inputContent` holds the
+        verbatim message and `reason` can quote it, so leaving either in place
+        would keep the erased data alive in the log. The rows themselves stay —
+        action, ids, timestamps and token usage — so the log still shows that a
+        decision happened, without what it was about. Returns rows redacted.
+        """
 
     @abstractmethod
     async def token_usage(self, scope: MemoryScope) -> dict[str, Any]:
