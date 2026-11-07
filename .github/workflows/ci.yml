@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.5"
+      - run: ruff check memdream tests scripts eval examples
+
+  test:
+    # Fully offline: fake model, fake embedder, in-process database.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - name: Offline examples
+        run: |
+          python examples/quickstart.py > /dev/null
+          python examples/embedded.py > /dev/null
+
+  integration:
+    # The suites that are skipped offline: real MongoDB (indexes, schema
+    # migration), the pgvector store and the Qdrant store.
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: memdream
+          POSTGRES_PASSWORD: memdream
+          POSTGRES_DB: memdream_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memdream"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports: ["6333:6333"]
+    env:
+      DREAM_TEST_MONGODB_URI: mongodb://localhost:27017
+      DREAM_TEST_POSTGRES_DSN: postgresql://memdream:memdream@localhost:5432/memdream_test
+      DREAM_TEST_QDRANT_URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,postgres,pgvector,qdrant]"
+      - run: pytest -q
+
+  package:
+    # The wheel must contain `memdream` only, with the starter prompts — a
+    # top-level `app` package would collide with users' own code.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build --wheel
+      - name: Check wheel contents
+        run: |
+          python - <<'EOF'
+          import glob, sys, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          tops = {n.split("/")[0] for n in names if not n.split("/")[0].endswith(".dist-info")}
+          assert tops == {"memdream"}, f"unexpected top-level entries: {sorted(tops)}"
+          assert any(n.startswith("memdream/templates/prompts/") for n in names), "starter prompts missing"
+          print("wheel OK:", len(names), "files")
+          EOF
+      - name: Install the wheel and run it from outside the repo
+        run: |
+          pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          python -m memdream prompts ./prompts
+          python -c "
+          from memdream import MemDream
+          with MemDream(user_id='ci', database='memory', prompts='./prompts', llm='fake', embeddings='fake') as m:
+              assert m.add('I live in Chennai.', raw=True).action == 'ADD'
+          print('installed package works')
+          "

@@ -6,6 +6,7 @@
 
 **A Python library that gives your AI agent long-term memory that maintains itself.**
 
+[![CI](https://github.com/Mamlesh18/MemDream/actions/workflows/ci.yml/badge.svg)](https://github.com/Mamlesh18/MemDream/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
