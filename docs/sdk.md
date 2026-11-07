@@ -1,8 +1,12 @@
 # Python SDK
 
-The MemDream SDK gives your Python agent long-term memory in a few lines. It
-comes in two forms with **the same methods, arguments, return types and
-exceptions**:
+MemDream is a library: import it, and your Python agent has long-term memory in
+a few lines, with nothing to deploy. `MemDream` (and its awaitable twin
+`AsyncMemDream`) is the way to use it, and almost everything below is about it.
+
+There is also an optional HTTP form, `DreamClient`, for when several apps share
+one memory through a [MemDream server](self-hosting.md). It has **the same
+methods, arguments, return types and exceptions**:
 
 | | Embedded — `MemDream` | Hosted — `DreamClient` |
 |---|---|---|
@@ -35,7 +39,7 @@ lifecycle explain most of what the methods below do.
 - [Use it in an agent](#use-it-in-an-agent)
 - **Reference**
   - [Constructors](#constructors)
-  - [Remember](#remember) — [`add`](#add) · [`create`](#create) · [`update`](#update) · [`forget`](#forget) · [`purge`](#purge)
+  - [Remember](#remember) — [`add`](#add) · [`create`](#create) · [`update`](#update) · [`forget`](#forget) · [`delete`](#delete) · [`purge`](#purge)
   - [Recall](#recall) — [`search`](#search) · [`get`](#get) · [`list`](#list) · [`history`](#history) · [`audit`](#audit)
   - [Dream](#dream) — [`synthesize`](#synthesize) · [`get_job`](#get_job) · [`wait_for`](#wait_for) · [`list_jobs`](#list_jobs) · [`stats`](#stats) · [`consolidate`](#consolidate)
   - [Server and lifecycle](#server-and-lifecycle)
@@ -96,6 +100,7 @@ mem = MemDream(
     llm="openai:gpt-4o-mini",
     embeddings="openai:text-embedding-3-small",
     prompts="./prompts",          # python -m memdream prompts ./prompts
+    database="memory",            # or "mongodb://...", "postgresql://..."
 )
 
 mem.add("Hi, I'm Priya. I live in Chennai.")
@@ -110,9 +115,8 @@ print(memories.as_context())
 # - User lives in Bangalore.
 ```
 
-The embedded form reads its configuration — database, LLM and embedding
-provider — from environment variables or a `.env` file. See
-[Configuration](#configuration).
+Anything not passed to the constructor is read from environment variables or a
+`.env` file. See [Configuration](#configuration).
 
 ### Hosted
 
@@ -217,22 +221,17 @@ Every setting is listed in [Self-hosting](self-hosting.md).
 
 ### Try it with no infrastructure
 
-The offline providers need no database, key or network. Add
-`pip install mongomock-motor`, then:
+The offline providers need no database, key or network:
 
 ```python
-from mongomock_motor import AsyncMongoMockClient
-from app.repositories.mongo import MongoDatabase
 from memdream import MemDream
 
 offline = MemDream(
     user_id="alice",
-    database=MongoDatabase(AsyncMongoMockClient(tz_aware=True), "demo"),
+    database="memory",      # in-process; gone when the process exits
     llm="fake",
     embeddings="fake",
-    vector="memory",
     prompts="./prompts",
-    identity_salt="demo",
 )
 ```
 
@@ -334,6 +333,7 @@ MemDream(
     vector: str | None = None,
     prompts: str | dict[str, str] | None = None,
     database: str | Database | None = None,
+    auto_dream: bool = True,
     settings: Settings | None = None,
     container: DreamContainer | None = None,
     **overrides,
@@ -347,7 +347,9 @@ MemDream(
 | `embeddings` | `"openai:text-embedding-3-small"`, optionally `":dimensions"` |
 | `vector` | `"faiss:./data/faiss"`, `"qdrant:http://localhost:6333"`, `"memory"` |
 | `prompts` | a directory of prompt files, or `{"extraction": "..."}` |
-| `database` | a connection string, or an already-connected database to use instead of opening one |
+| `database` | `"mongodb://..."`, `"postgresql://..."`, `"memory"` (in-process, no server, kept only while the process runs; the vector index then defaults to `"memory"` too), or an already-connected database to use instead of opening one |
+| `auto_dream` | `True` (default): synthesis triggers itself as memories accumulate, and a daily pass retires memories whose validity has ended — for as long as the process runs. `False`: nothing runs unless you call [`synthesize`](#synthesize) or [`consolidate`](#consolidate) |
+| `log_level` | MemDream logs only warnings by default, to stderr, and leaves your app's own logging alone. `log_level="INFO"` shows every decision |
 | `settings` | a complete `app.core.config.Settings`. Default: read from the environment |
 | `**overrides` | any other setting, e.g. `triage_enabled=False` |
 | `container` | an already-built engine to adopt, e.g. the one your MemDream server app built. The SDK will not close what it did not open |
@@ -522,6 +524,23 @@ mem.forget("mem_9eff9c243db54ffda6c75295", permanent=True)
 ```
 
 HTTP: [`DELETE /v1/memories/{memoryId}`](api.md#delete-v1memoriesmemoryid).
+
+### `delete`
+
+Erase a memory for good — the row and every relationship touching it. The same
+as `forget(memory_id, permanent=True)`. Cannot be undone; use `forget` when you
+only want it out of search results.
+
+```python
+delete(memory_id: str, **scope) -> dict
+```
+
+```python
+mem.delete("mem_9eff9c243db54ffda6c75295")
+# {'memoryId': 'mem_9eff9c243db54ffda6c75295', 'result': 'deleted', 'permanent': True}
+```
+
+HTTP: [`DELETE /v1/memories/{memoryId}?permanent=true`](api.md#delete-v1memoriesmemoryid).
 
 ### `purge`
 
@@ -966,5 +985,5 @@ The surface is the same. What differs is where the work happens:
 | `ready()` `metrics()` `token_usage()` | not available | available |
 | `AddResult.request_id` | `None` | the server's request id |
 | `synthesize()` without `wait` | runs in a background task in your process — keep the process alive until it finishes | runs on the server |
-| Nightly consolidation | only in a running MemDream server | runs on the server |
+| Daily consolidation | runs in your process while it is alive (`auto_dream=True`) | runs on the server |
 | Connection pools | one per `MemDream` instance | shared by every client of the server |

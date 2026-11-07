@@ -3,14 +3,14 @@
     python examples/embedded.py
 
 Runs entirely offline: the deterministic fake LLM and embedding providers, the
-in-process vector store, and an in-memory MongoDB. No API keys, no containers,
+in-process vector store, and `database="memory"`. No API keys, no containers,
 no cost — so you can watch the decision logic before wiring up a real provider.
 
-To point it at real infrastructure, delete `**OFFLINE` and the `database=`
-argument and set the usual environment variables (`AZURE_OPENAI_API_KEY`,
-`DREAM_MONGODB_URI`, ...). Nothing else in this file changes — which is the
-point: the difference between this demo and production is configuration, not
-code.
+To point it at real infrastructure, replace `**OFFLINE` with real choices —
+`llm="openai:gpt-4o-mini"`, `embeddings="openai:text-embedding-3-small"`,
+`database="mongodb://localhost:27017/memdream"` — and set `OPENAI_API_KEY`.
+Nothing else in this file changes — which is the point: the difference between
+this demo and production is configuration, not code.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from pathlib import Path
 # Runnable straight from a checkout, without installing the package first.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.logging import configure_logging  # noqa: E402
 from memdream import MemDream  # noqa: E402
 
 #: Every one of these is an ordinary setting, normally read from the environment.
@@ -30,30 +29,14 @@ OFFLINE = {
     # repository; copy them into your own project with
     # `python -m memdream prompts ./prompts` and edit them.
     "prompts": str(Path(__file__).resolve().parent.parent / "prompts"),
-    "llm_provider": "fake",
-    "embedding_provider": "fake",
-    "vector_provider": "memory",
-    "queue_provider": "inline",
-    "identity_salt": "example-salt-do-not-use-in-production",
-    "log_json": False,
-    "log_level": "WARNING",
+    "llm": "fake",
+    "embeddings": "fake",
+    "database": "memory",
 }
 
 
-def offline_database():
-    """An in-memory MongoDB, so the example needs no database running."""
-    from mongomock_motor import AsyncMongoMockClient
-
-    from app.repositories.mongo import MongoDatabase
-
-    return MongoDatabase(AsyncMongoMockClient(tz_aware=True), "memdream_example")
-
-
 def main() -> None:
-    # Otherwise structlog prints every internal event and buries the output.
-    configure_logging("WARNING", json_output=False)
-
-    with MemDream(user_id="alice", database=offline_database(), **OFFLINE) as mem:
+    with MemDream(user_id="alice", **OFFLINE) as mem:
         print("--- remembering ---")
         for line in (
             "I live in Chennai.",

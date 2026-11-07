@@ -4,14 +4,13 @@
 
 # MemDream
 
-**A self-maintaining long-term memory layer for AI agents.**
+**A Python library that gives your AI agent long-term memory that maintains itself.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-246%20passing-brightgreen.svg)](tests/)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[Quick start](#quick-start) · [How it works](#how-it-works) · [Use in your project](#use-it-in-your-project) · [Your own prompts](#write-your-own-prompts) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [Quick start](#quick-start) · [The whole API](#the-whole-api) · [Dream](#dream-runs-on-its-own) · [Your prompts](#write-your-own-prompts) · [How it works](#how-it-works)
 
 </div>
 
@@ -19,310 +18,217 @@
 
 ## What is MemDream?
 
+MemDream is a library you import into your own code. There is no server to run
+and nothing to deploy: your agent calls `mem.add(...)` and `mem.search(...)`, and
+MemDream keeps the memory correct over time.
+
 Most "agent memory" is a vector database with an `add()` call. That works right up
-until the user contradicts themselves.
+until the user contradicts themselves. Tell it *"I live in Chennai"*, then later
+*"I moved to Bangalore"*, and a plain vector store now holds **both** — and
+answers with whichever is worded closer to the question.
 
-Tell it *"I live in Chennai"*, then later *"I moved to Bangalore"*, and a plain
-vector store now holds **both**. It answers with whichever happens to be worded
-closer to your question. Your agent confidently tells the user they live in the
-wrong city.
-
-MemDream is built around that problem. Every incoming fact is reasoned about
-against what is already known, and one of four things happens:
+MemDream reasons about every new fact against what it already knows, using
+**prompts you write**, and one of four things happens:
 
 | | When | What happens to the old memory |
 |---|---|---|
 | **ADD** | Genuinely new fact | — |
-| **SUPERSEDE** | Contradicts something stored | Kept, marked `superseded`, points at its replacement |
-| **MERGE** | Same fact, said better | Kept, marked `merged`, points at the canonical version |
+| **SUPERSEDE** | Contradicts something stored | Kept as history, marked `superseded`, points at its replacement |
+| **MERGE** | Same fact, said better | Kept as history, marked `merged`, points at the canonical version |
 | **NOOP** | Adds nothing | Nothing changes — and the reason is recorded |
 
-Then, in the background, **Dream** reads across many memories and writes down the
-patterns none of them state individually — with references back to its evidence.
-
-**Nothing is ever deleted.** Superseded and merged memories are retained with
-pointers to whatever replaced them, so *"where did they live before, and when did
-that change?"* stays answerable forever.
+Then, in the background, **Dream** reads across a user's memories, writes down the
+patterns none of them state individually, and retires facts that are no longer
+true. You do not have to schedule anything.
 
 ---
 
-## How it works
+## Install
 
-<div align="center">
-<img src="assets/how-it-works.png" alt="How MemDream works" width="820" />
-</div>
+MemDream is installed from GitHub (it is not on PyPI):
 
-When a message arrives, the cheap deterministic checks run first and the
-expensive one runs last, on as little as possible:
-
-```
-your message
-   ↓
-extraction (LLM)          pull out durable facts, drop small talk
-   ↓
-policy                    confidence / importance floors, sensitivity rules
-   ↓
-exact-duplicate check     hash lookup — costs nothing if you repeat yourself
-   ↓
-embed + find candidates   scoped to THIS user only
-   ↓
-decision (LLM)            ADD / SUPERSEDE / MERGE / NOOP
-   ↓
-validation                drop invented ids, protect permanent facts
-   ↓
-state transition          the backend does this, never the model
-   ↓
-vector index + audit log
+```bash
+pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git"
 ```
 
-And separately, off the request path:
+Add extras for the providers you use:
 
-```
-scheduler or API trigger
-   ↓
-candidate selection       1000 memories → ~200, deterministic
-   ↓
-clustering                → ~20 clusters
-   ↓
-synthesis (LLM)           one call per cluster
-   ↓
-idempotency check         source overlap, then semantic similarity
-   ↓
-pattern memory + provenance edges
+```bash
+pip install "memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git"           # Claude
+pip install "memdream[gemini,postgres] @ git+https://github.com/Mamlesh18/MemDream.git"     # several at once
 ```
 
-### Design commitments
-
-**Non-destructive.** No Dream operation deletes. Status transitions are one-way,
-and terminal rows are never rewritten — which is also what makes a replayed
-operation converge instead of corrupting the chain.
-
-**LLM-assisted, not LLM-controlled.** The model returns a *proposal*. The backend
-intersects its target ids with the ids it actually showed the model, clamps its
-scores, and refuses to retire protected memories. A model cannot reach a memory
-it was never given, so it cannot reach another tenant's memory by guessing an id.
-
-**Tenant-safe by construction.** Every repository method takes a `MemoryScope`;
-there is no method that reads a memory without one. The vector index is
-partitioned physically per `(client, bot, user)`, so cross-tenant retrieval is
-not something a filtering bug can cause — it is unrepresentable.
-
-**Explainable.** Every operation writes an audit row, `NOOP` included. *"Why was
-nothing remembered?"* is the question you will actually have, and it has an answer.
-
-Diagrams: [`docs/diagrams.md`](docs/diagrams.md) · Full detail: [`docs/how-it-works.md`](docs/how-it-works.md) ·
-[`docs/architecture.md`](docs/architecture.md)
+Python 3.10+. OpenAI, Azure OpenAI, Groq, Ollama, Together and Fireworks need no extra.
 
 ---
 
 ## Quick start
 
-### Option 1 — Docker (everything)
+**1. Get the starter prompts.** MemDream decides *how* to remember; your prompts
+decide *what* is worth remembering for your product. Copy the starter set and
+edit it later:
 
 ```bash
-git clone https://github.com/your-org/memdream.git
-cd memdream
-cp .env.example .env        # fill in AZURE_OPENAI_*
-docker compose up --build
+python -m memdream prompts ./prompts
 ```
 
-Open http://localhost:8000/docs
-
-### Option 2 — Run it locally
+**2. Set your model key** in the environment (keys never go in code):
 
 ```bash
-python -m venv .venv
-.venv/Scripts/activate          # Windows
-source .venv/bin/activate       # macOS / Linux
-
-pip install -r requirements.txt          # or: pip install .
-cp .env.example .env                     # fill in AZURE_OPENAI_*
-
-python -m memdream prompts ./prompts     # MemDream ships no prompts; this is a
-                                         # working set to edit. See below.
-
-uvicorn app.main:app --reload
+export OPENAI_API_KEY=sk-...
 ```
 
-For development, add the test and lint tooling:
-
-```bash
-pip install -r requirements-dev.txt      # or: pip install -e ".[dev]"
-pytest
-```
-
-MemDream needs **one database** and nothing else — MongoDB or PostgreSQL. No
-broker, no worker process; synthesis runs inside the API. See
-[one service](#one-service).
-
-### Option 3 — Zero infrastructure
-
-Every provider has an offline implementation, so you can see the whole thing work
-with no database, no credentials and no network:
-
-```bash
-python examples/quickstart.py
-```
-
-### Try it
-
-```bash
-curl -X POST http://localhost:8000/v1/memories \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "prompt": "I live in Chennai and I work at Acme.",
-        "phoneNumber": "+919999999999",
-        "botId": "bot_123",
-        "clientId": "client_456"
-      }'
-
-# now contradict it
-curl -X POST http://localhost:8000/v1/memories \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "prompt": "I moved to Bangalore last month.",
-        "phoneNumber": "+919999999999",
-        "botId": "bot_123",
-        "clientId": "client_456"
-      }'
-
-# → {"action":"SUPERSEDE","memoryId":"mem_...","supersededMemoryIds":["mem_..."]}
-```
-
-### The visual console
-
-```bash
-# with the API running
-open console.html          # macOS
-start console.html         # Windows
-```
-
-A single-file web console: multiple user sessions, live colour-coded decisions,
-memory inspector, audit trail, token costs, and a log of every API call it makes.
-The fastest way to understand what the system is doing.
-
----
-
-## Use it in your project
-
-Two ways in, one surface. **Embedded** runs MemDream inside your process — no
-server, no worker, nothing to deploy:
+**3. Use it:**
 
 ```python
 from memdream import MemDream
 
-mem = MemDream(user_id="alice")          # scope set once
-
-mem.add("I moved to Bangalore.")
-print(mem.search("Where does the user live?").as_context())
-# - User lives in Bangalore.
-```
-
-That is the whole integration. It builds the same `DreamContainer` the API
-builds, so contradiction handling, tenant isolation and synthesis behave exactly
-as they do behind HTTP.
-
-**Hosted** talks to a running MemDream instead — one process holding the
-database connections, several agents sharing it:
-
-```python
-from memdream import DreamClient
-
-client = DreamClient(
-    base_url="http://localhost:8000",
-    client_id="client_456",
-    bot_id="bot_123",
-    phone_number="+919999999999",   # set the scope once
+mem = MemDream(
+    user_id="alice",                          # whose memory this is
+    prompts="./prompts",
+    llm="openai:gpt-4o-mini",
+    embeddings="openai:text-embedding-3-small",
+    database="memory",                        # no database needed to try it
 )
 
-# Remember
-result = client.memory.add("I moved to Bangalore.")
-print(result.action)                    # SUPERSEDE
-print(result.superseded_memory_ids)     # ['mem_...']
+mem.add("I live in Chennai.")
+mem.add("I moved to Bangalore last month.")   # -> SUPERSEDE: Chennai becomes history
 
-# Recall
-memories = client.memory.search("Where does the user live?", latest_only=True)
-print(memories.as_context())
+print(mem.search("Where does the user live?", latest_only=True).as_context())
 # - User lives in Bangalore.
-
-# Dream
-job = client.dream.synthesize()
-job = client.dream.wait_for(job.job_id)
 ```
 
-The two have **the same method names, arguments and return types**, so moving a
-prototype onto a deployed service changes the constructor line and nothing else.
-`AsyncMemDream` and `AsyncDreamClient` are the awaitable equivalents. Full
-reference: [`docs/sdk.md`](docs/sdk.md).
-
-|  | `MemDream` (embedded) | `DreamClient` (hosted) |
-|---|---|---|
-| Deploy | nothing | uvicorn, optionally a worker |
-| Connections | one pool per process using it | one pool, shared |
-| Best for | scripts, notebooks, a single agent, getting started | several services, several languages, central control |
-| Synthesis | `synthesize(wait=True)` runs it inline | a worker picks it up |
-| Needs | the whole package | `httpx` |
-
-A start-embedded, move-to-hosted path is the intended one, and it costs a line:
+`database="memory"` keeps everything in your process and forgets it when the
+process exits — ideal for trying MemDream and for tests. For real use, point it
+at MongoDB or PostgreSQL and nothing else changes:
 
 ```python
-mem = MemDream(user_id="alice")                                  # day one
-mem = DreamClient("https://memory.internal", user_id="alice")    # later
+mem = MemDream(user_id="alice", prompts="./prompts",
+               llm="openai:gpt-4o-mini", embeddings="openai:text-embedding-3-small",
+               database="mongodb://localhost:27017/memdream")
+# or database="postgresql://user:pass@localhost/memdream"
 ```
+
+**No API key yet?** `python examples/quickstart.py` (from a clone) runs the whole
+system on offline stand-ins for the model, the embedder and the database.
+
+---
+
+## The whole API
+
+Every method is on the `mem` object. Scope (`user_id`) is set once in the
+constructor; pass `user_id=...` on any call to act for someone else.
+
+### Remember
+
+```python
+result = mem.add("I'm vegetarian and I work at Acme.")   # your prompts decide what to keep
+result.action                  # "ADD" | "SUPERSEDE" | "MERGE" | "NOOP"
+result.memory_id               # the memory written or kept
+result.superseded_memory_ids   # what it replaced, if anything
+```
+
+### Recall
+
+```python
+found = mem.search("What does the user eat?", latest_only=True, limit=5)
+found.as_context()             # "- User is vegetarian." — ready to drop into a prompt
+for m in found:
+    m.content, m.score, m.memory_type
+```
+
+### Add, edit and delete by hand
+
+When you already know exactly what to store, skip the model entirely:
+
+```python
+m = mem.create("User is allergic to peanuts.", memory_type="constraint")
+mem.update(m.memory.memory_id, content="User has a severe peanut allergy.")
+
+mem.forget(memory_id)          # retire it: out of search, still in history — reversible
+mem.delete(memory_id)          # erase it for good — not reversible
+mem.purge(confirm=True)        # erase everything about this user (e.g. a GDPR request)
+```
+
+### Inspect
+
+```python
+mem.get(memory_id)             # one memory, with what it replaced and what it came from
+mem.list()                     # active memories, no query needed
+mem.history(memory_id)         # the chain of facts it superseded: "where did they live before?"
+mem.audit()                    # every decision and why — including the NOOPs
+mem.stats()                    # counts, token spend, estimated cost
+```
+
+### Dream, on demand
+
+```python
+mem.synthesize(wait=True)      # look for patterns across this user's memories now
+mem.consolidate()              # dry run: what would be retired, changing nothing
+mem.consolidate(dry_run=False) # do it
+```
+
+Full reference, every argument: [`docs/sdk.md`](docs/sdk.md).
 
 ### In an agent turn loop
 
-Three lines, and it works with any framework:
+Works with any framework:
 
 ```python
-memories = mem.search(user_message, latest_only=True)   # recall
-reply    = your_llm(system_prompt + memories.as_context(), user_message)
-mem.add(user_message)                                   # remember
+memories = mem.search(user_message, latest_only=True)            # recall
+reply = your_llm(system_prompt + memories.as_context(), user_message)
+mem.add(user_message)                                            # remember
 ```
 
-`mem` here is either form — the loop does not care which.
+**Recall before responding, remember after** — otherwise the current message
+becomes context for answering itself. In a web server, use `AsyncMemDream` (the
+same methods, awaited) and do the `add` in the background so the user is not
+waiting on it.
 
-Two things worth copying: **recall before responding, remember after** (otherwise
-the current message becomes context for answering itself), and **do the write in
-the background** so the user is not waiting on it.
+Working examples: [`examples/custom_agent.py`](examples/custom_agent.py) (any
+framework) · [`examples/semantic_kernel_agent.py`](examples/semantic_kernel_agent.py)
+(Semantic Kernel) · [`examples/embedded.py`](examples/embedded.py).
 
-Working examples:
+**Create one `MemDream` per process and reuse it** — it holds the database and
+model connections. Close it on shutdown (`mem.close()`, or use `with MemDream(...) as mem:`).
 
-- [`examples/custom_agent.py`](examples/custom_agent.py) — any framework
-- [`examples/semantic_kernel_agent.py`](examples/semantic_kernel_agent.py) — Semantic Kernel, as a plugin *and* a filter
-- [`examples/quickstart.py`](examples/quickstart.py) — no infrastructure at all
+---
 
-### Manual control
+## Dream runs on its own
 
-The Dream layer decides what to keep from conversation. When you already know
-exactly what to store, bypass it:
+You do not need a cron job, a worker or a queue. With the default
+`auto_dream=True`, as long as your process is running:
+
+| What | When | Costs a model call? |
+|---|---|---|
+| **Synthesis** — writes pattern memories ("User usually orders vegetarian on weekdays") with links to their evidence | after a user gains 20 new memories, at most every 6 hours | yes, one per cluster |
+| **Expiry** — retires memories whose validity has ended ("on leave until Friday", or a fact that was superseded) | once a day, 00:00 UTC | no |
+| **Compaction** — folds piles of low-value memories into one summary | off by default | yes |
+| **Decay** — retires what nothing has recalled in a long time | off by default | no |
+
+Retiring is a status change, never a deletion, so a wrong call is reversible.
+Running synthesis twice over the same evidence produces one pattern, not two.
+
+Turn it off and call `synthesize()` / `consolidate()` yourself instead:
 
 ```python
-client.memory.create("User is allergic to peanuts.", memory_type="constraint")
-client.memory.update(memory_id, content="User has a severe peanut allergy.")
-client.memory.forget(memory_id)                      # retire, reversible
-client.memory.forget(memory_id, permanent=True)      # erase, irreversible
-client.memory.purge(confirm=True)                    # erase everything for a user
+mem = MemDream(user_id="alice", ..., auto_dream=False)
 ```
 
-### Or just HTTP
-
-Every endpoint is documented at [`docs/api.md`](docs/api.md), and interactively at
-`/docs` on a running instance.
+Every threshold above is configurable — see [`config/dream.yaml`](config/dream.yaml).
 
 ---
 
 ## Write your own prompts
 
-**MemDream ships no prompts.** The engine knows *how* to extract facts, decide
-between adding and superseding, find patterns and compact old memories. What to
-**say** to the model is yours, because it is the part that depends on your
-product — a memory layer for a restaurant, a bank and a support desk should
-remember different things.
+**MemDream ships no built-in prompts.** The engine knows *how* to extract facts,
+decide between adding and superseding, find patterns and compact old memories.
+What to **say** to the model is yours, because it depends on your product — a
+memory layer for a restaurant, a bank and a support desk should remember
+different things.
 
 ```bash
 python -m memdream prompts ./prompts     # a working set, yours to edit
-export DREAM_PROMPTS_DIR=./prompts       # or MemDream(prompts="./prompts")
 ```
 
 ```
@@ -334,25 +240,23 @@ synthesis.md    what patterns matter
 compaction.md   how to fold a crowd of old memories into one summary
 ```
 
-The smallest working set is two files — unified decisions need `extraction` and
-`decision`; synthesis and compaction are asked for only when enabled. A
-deployment missing one **does not start**, and the error names every missing
-prompt and three ways to supply it.
+The smallest working set is two files: `extraction` and `decision`. Synthesis and
+compaction prompts are needed only when those are enabled. If a required prompt
+is missing, MemDream refuses to start and tells you which one. Prompts can also
+be passed inline: `MemDream(prompts={"extraction": "...", "decision": "..."})`.
 
-### Three layers to a prompt
+### What you write, and what MemDream handles
 
 | Layer | Example | Who owns it |
 |---|---|---|
 | **Contract** | the output JSON shape | **MemDream** — appended to your prompt and validated on the way back, so you never write it |
-| **Safety** | never invent ids, preserve history, lose no detail in a merge | **Shared** — the backend enforces them and the starter prompts ask for them. Keep these |
-| **Domain** | what matters in your vertical, what to ignore, worked examples | **You** |
+| **Safety** | never invent ids, preserve history, lose no detail in a merge | **Shared** — the code enforces these anyway, and the starter prompts ask for them |
+| **Domain** | what matters in your product, what to ignore, worked examples | **You** |
 
 ### Tuning for your use case
 
-Start with `prompts/extraction.md`. It decides what is worth remembering at all,
-and that varies enormously between verticals: the same sentence means different
-things to a healthcare intake bot, a recruiter and a shopping assistant. The
-whole file is the prompt — there is no front matter and no comment syntax:
+Start with `prompts/extraction.md`. The whole file is the prompt — no front
+matter, no special syntax:
 
 ```markdown
 Extract durable facts about the user from one message.{domain}
@@ -367,225 +271,180 @@ One fact per memory, third person about "User", self-contained months later.
 ```
 
 **Worked examples move behaviour more than instructions do.** Two or three
-input → output pairs are worth a paragraph of prose. `{domain}` anywhere in a
-prompt is replaced with your `DREAM_DOMAIN` sentence.
+input → output pairs are worth a paragraph of prose. `{domain}` is replaced with
+your `DREAM_DOMAIN` sentence.
 
-Full guide — what each prompt receives, what it must return, and how to test a
+Full guide — what each prompt receives, what it must return, how to test a
 change: [`docs/prompts.md`](docs/prompts.md).
-
-Then tune thresholds in [`config/dream.yaml`](config/dream.yaml) — but **measure
-first**:
-
-```bash
-python -m scripts.calibrate
-```
-
-This embeds labelled pairs and reports where each relationship actually lands for
-*your* model. Do not guess. Cosine similarity reads like a percentage and is not
-one, and the bands move a lot between embedding models.
-
-Everything is configurable without touching Python. Environment overrides YAML,
-which overrides defaults:
-
-```bash
-DREAM_RETRIEVAL__TOP_K=20
-DREAM_DREAM__SYNTHESIS__MIN_MEMORIES=50
-DREAM_MEMORY__ALLOW_SENSITIVE=true
-```
 
 ---
 
-## One service
+## Models and storage
 
-```bash
-uvicorn app.main:app          # that is the whole deployment
+Pick each piece in the constructor. API keys always come from the environment.
+
+```python
+MemDream(
+    user_id="alice",
+    llm="anthropic:claude-sonnet-4-5",          # or "openai:...", "azure:...", "gemini:...", "groq:...", "ollama:..."
+    embeddings="openai:text-embedding-3-small", # or "gemini:...", "ollama:...", "azure:..."
+    database="postgresql://localhost/memdream", # or "mongodb://...", or "memory"
+    vector="faiss:./data/faiss",                # the default; or "qdrant:http://...", "memory", ...
+    prompts="./prompts",
+)
 ```
 
-**Nothing on the user's path goes through a queue.** Remember, recall, supersede
-and merge all run synchronously inside the API. Background synthesis is the only
-thing that does not, and it does not need a broker or a second process.
-
-Synthesis makes one LLM call per cluster and takes seconds, so the write that
-triggers it cannot wait for it. That is the only hard requirement — **the work
-must be detached from the request that caused it** — and detached does not have
-to mean "another process". By default it is a bounded pool of asyncio tasks in
-the API process.
-
-```bash
-DREAM_QUEUE_PROVIDER=inline     # default. One process, no broker
-DREAM_QUEUE_PROVIDER=database   # jobs table is the queue, claimed by a worker
-```
-
-| | `inline` | `database` |
+| Piece | Options | Key from |
 |---|---|---|
-| Processes to deploy | **1** | 2 |
-| Extra services | **none** | none |
-| Add / search / supersede | identical | identical |
-| Survives a restart mid-job | re-fires on next write | yes |
-| Shared across API replicas | no | yes |
+| LLM | OpenAI · Azure OpenAI · Anthropic · Gemini · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`, `AZURE_OPENAI_*` |
+| Embeddings | OpenAI · Azure OpenAI · Gemini · Ollama · any OpenAI-compatible endpoint | same |
+| Database | `memory` (no server, for trying it) · MongoDB · PostgreSQL | — |
+| Vector index | FAISS (default, local files) · in-memory · Qdrant · pgvector · Chroma · Pinecone · Milvus · Azure AI Search | — |
 
-There is no Redis option, and that is deliberate: `database` gives the same
-guarantees for the same two processes without a broker to run, so a Redis-backed
-queue would buy nothing but claim latency measured in milliseconds — for work
-measured in seconds and scheduled in hours.
+Anthropic and Groq have no embeddings API, so pair them with another embedder.
+Ollama gives a fully local setup with no key and no per-token cost.
 
-### Why in-process is safe here
+The same settings can come from environment variables instead of code
+(`DREAM_LLM_PROVIDER=openai`, `DREAM_DATABASE_PROVIDER=postgres`, …), and every
+tuning threshold lives in [`config/dream.yaml`](config/dream.yaml). The database
+is the source of truth; the vector index is derived from it and can be rebuilt
+at any time with `scripts/rebuild_index.py`.
 
-Most background work would be reckless to run this way. Synthesis has two
-properties that make it the exception, and both have to hold:
+Before changing similarity thresholds, **measure** them for your embedding
+model — `python -m scripts.calibrate` — rather than guessing.
 
-**It is idempotent.** Running it twice over the same evidence produces one
-pattern, not two — the synthesiser checks source overlap and semantic similarity
-before writing anything.
+---
 
-**Its trigger is derived from durable state.** "This user has N new memories
-since their last completed run" is a fact in the database, not an event you can
-miss. A job lost to a restart costs nothing: the condition is still true, and
-the next write re-creates it.
+## How it works
 
-So losing a job is not losing work. That is the opposite of a payment webhook —
-which is what delivery guarantees are actually for.
+<div align="center">
+<img src="assets/how-it-works.png" alt="How MemDream works" width="820" />
+</div>
 
-It is also LLM-bound: almost its whole duration is spent awaiting the network,
-which on an event loop costs essentially nothing. The only real CPU is
-clustering a few hundred vectors.
+On `add()`, the cheap deterministic checks run first and the model runs last, on
+as little as possible:
 
-The pool is bounded rather than one task per job, because fifty calls to
-`POST /v1/dream/synthesize` would otherwise open fifty concurrent LLM streams
-and turn a traffic spike into a rate-limit incident. Past the queue limit a job
-is failed immediately with a reason rather than parked — a row sitting at
-`queued` reads as in-flight and would block that user's next trigger for the
-whole stale timeout. Shutdown drains in-flight work before stopping.
-
-```yaml
-dream:
-  synthesis:
-    max_concurrent: 2      # jobs this process runs at once
-    max_queued: 100        # waiting, before backpressure
-    drain_seconds: 30      # how long shutdown waits
+```
+your message
+   ↓
+triage                    "hi", "thanks", "ok" never reach the model
+   ↓
+extraction (LLM)          pull out durable facts, using YOUR extraction prompt
+   ↓
+policy                    confidence / importance floors, sensitivity rules
+   ↓
+exact-duplicate check     hash lookup — costs nothing if the user repeats themselves
+   ↓
+embed + find candidates   scoped to THIS user only
+   ↓
+decision (LLM)            ADD / SUPERSEDE / MERGE / NOOP, using YOUR decision prompt
+   ↓
+validation                drop invented ids, protect permanent facts
+   ↓
+state change              done by code, never by the model
+   ↓
+vector index + audit log
 ```
 
-`GET /ready` reports the queue's depth (waiting + running), so saturation is
-visible before it becomes a problem.
+And in the background (Dream):
 
-### When to move off it
-
-Two reasons, both about running more than one API process: several replicas that
-should share one synthesis queue, or a job that genuinely must survive the
-process that queued it restarting. Then `database` — the same idea with the jobs
-table as the queue, and a worker claiming rows with an atomic compare-and-swap
-(`find_one_and_update` on MongoDB, `FOR UPDATE SKIP LOCKED` on Postgres). Two
-workers polling at the same instant cannot claim the same job.
-
-```bash
-uvicorn app.main:app                        # terminal 1, or N replicas
-python -m app.workers.synthesis_worker      # terminal 2
+```
+enough new memories, or the daily clock
+   ↓
+candidate selection       1000 memories → ~200, deterministic
+   ↓
+clustering                → ~20 clusters
+   ↓
+synthesis (LLM)           one call per cluster
+   ↓
+idempotency check         source overlap, then semantic similarity
+   ↓
+pattern memory + links to its evidence
 ```
 
-Still no broker.
+### Design commitments
 
+**History is kept unless you delete it.** Superseded and merged memories stay,
+with pointers to what replaced them, so *"where did they live before, and when
+did that change?"* stays answerable. Nothing MemDream does on its own ever
+deletes; only your explicit `delete()` or `purge()` does.
 
-## Providers
+**The model proposes, the code decides.** The model's answer is checked against
+the memories it was actually shown, its scores are clamped, and it cannot retire
+protected memories. A model cannot reach a memory it was never given.
 
-| Layer | Shipped | Interface |
+**Users are isolated by construction.** Every storage call takes the user's
+scope; there is no way to read a memory without one, and each user's vectors
+live in their own partition.
+
+**Explainable.** Every decision writes an audit row, `NOOP` included. *"Why was
+nothing remembered?"* is the question you will actually have, and `mem.audit()`
+answers it.
+
+More: [`docs/concepts.md`](docs/concepts.md) · [`docs/how-it-works.md`](docs/how-it-works.md) ·
+[`docs/diagrams.md`](docs/diagrams.md) · [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## What it costs
+
+Measured with `gpt-4o-mini` + `text-embedding-3-small`:
+
+| Action | LLM calls | Approx. cost |
 |---|---|---|
-| LLM | Azure OpenAI · OpenAI · Groq · Ollama · Together · Fireworks · any OpenAI-compatible endpoint · **Gemini** · **Anthropic** · offline fake | `app/providers/llm/base.py` |
-| Embeddings | Azure OpenAI · OpenAI · Ollama · any OpenAI-compatible endpoint · **Gemini** · offline fake | `app/providers/embeddings/base.py` |
-| Vector store | FAISS · in-memory · Qdrant · pgvector · Chroma · Pinecone · Milvus · Azure AI Search | `app/providers/vector_store/base.py` |
-| Queue | **in-process pool (default)** · the canonical store's jobs table | `app/providers/queue/base.py` |
-| Canonical store | MongoDB · PostgreSQL | `app/repositories/` |
+| Message with a new fact | 2 (extract + decide) | ~$0.0007 |
+| Message, nothing related yet | 1 (extract only) | ~$0.0003 |
+| Greeting / small talk | **0** — triage | **$0** |
+| Exact repeat | **0** — hash lookup | **$0** |
+| Search | **0** | ~$0.0000001 |
+| `create` / `update` by hand | **0** | ~$0.0000001 |
+| `forget` / `delete` | **0** | **$0** |
+| Dream synthesis | 1 per cluster | ~$0.0004 |
 
-Switching provider is configuration, not code:
-
-```bash
-# fully local — no API key, no per-token cost
-DREAM_LLM_PROVIDER=ollama
-DREAM_EMBEDDING_PROVIDER=ollama
-
-# Groq for chat (fast, cheap), OpenAI for embeddings (Groq has no embeddings API)
-DREAM_LLM_PROVIDER=groq          GROQ_API_KEY=gsk_...
-DREAM_EMBEDDING_PROVIDER=openai  OPENAI_API_KEY=sk-...
-
-# your own vLLM / LiteLLM / proxy
-DREAM_LLM_PROVIDER=openai_compatible
-DREAM_OPENAI_BASE_URL=http://vllm.internal/v1
-DREAM_OPENAI_CHAT_MODEL=mistral-7b
-
-# Gemini for both roles — pip install memdream[gemini]
-DREAM_LLM_PROVIDER=gemini         GOOGLE_API_KEY=...
-DREAM_EMBEDDING_PROVIDER=gemini
-
-# Claude for chat, OpenAI for embeddings — pip install memdream[anthropic]
-DREAM_LLM_PROVIDER=anthropic      ANTHROPIC_API_KEY=sk-ant-...
-DREAM_EMBEDDING_PROVIDER=openai   OPENAI_API_KEY=sk-...
-```
-
-OpenAI, Groq, Ollama, Together and Fireworks all speak the same wire protocol,
-so they are one implementation with a preset table — and they need no extra
-dependency beyond the `openai` package already installed.
-
-Gemini and Anthropic are the two exceptions, each with its own SDK behind an
-optional extra. The reason is **guaranteed structured output**: every Dream
-decision has to satisfy a Pydantic schema, and a provider that can only be
-*asked* for JSON costs a repair round-trip on every malformed reply. Gemini's
-native SDK sets `response_mime_type="application/json"`, a decoding constraint
-rather than an instruction — and reports token usage accurately, which the
-compatibility shim does not. Claude has no JSON mode at all, so its assistant
-turn is prefilled with an opening brace and the model can only continue from
-inside an object.
-
-Nothing in `app/memory` or `app/dream` imports a concrete provider — they take the
-base classes. Adding OpenAI, Ollama, Qdrant, pgvector or Celery is an adapter plus
-one line in a factory, not a refactor.
+`mem.stats()` reports live token spend and estimated cost per user.
 
 ---
 
 ## Testing and evaluation
 
 ```bash
-pytest                 # 246 tests, fully offline, no credentials needed
-python -m eval.run     # 250-case evaluation set
+git clone https://github.com/Mamlesh18/MemDream.git && cd MemDream
+pip install -e ".[dev]"
+pytest                 # fully offline, no credentials needed
+python -m eval.run     # 250 hand-written cases: 50 each of ADD, MERGE, SUPERSEDE, NOOP, SYNTHESIS
 python -m eval.run --provider azure --report eval/results/azure.json
 ```
 
-The evaluation set is 250 hand-written cases — 50 each of ADD, MERGE, SUPERSEDE,
-NOOP and SYNTHESIS — including the cases that must *not* fire: additive detail
-that looks like contradiction, two pets that look like duplicates, patterns
-already covered by an existing pattern.
-
-Offline baseline with the deterministic fake reasoner:
-
-```
-suite           cases  passed   overall    action
-add                50      49    98.0%     98.0%
-merge              50      43    86.0%     86.0%
-supersede          50      39    78.0%     78.0%
-noop               50      50   100.0%    100.0%
-synthesis          50      30    60.0%     78.0%
-TOTAL             250     211    84.4%
-```
-
-Run with `--provider azure` for the number that matters for your deployment.
+The evaluation set includes the cases that must *not* fire: added detail that
+looks like a contradiction, two pets that look like duplicates, patterns already
+covered by an existing one. The default run uses a deterministic offline stand-in
+for the model, so it tests the pipeline, not model quality — run it with a real
+provider to measure your prompts.
 
 ---
 
-## What it costs
+## Optional: running it as a shared service
 
-Measured against `gpt-4o-mini` + `text-embedding-3-small`:
+You do not need this to use MemDream. It exists for when several apps — or
+apps not written in Python — should share one memory. The same engine is
+available as an HTTP API:
 
-| Action | LLM calls | Approx. cost |
-|---|---|---|
-| Message with a new fact | 2 (extract + decide) | ~$0.0007 |
-| Message, nothing related yet | 1 (extract only) | ~$0.0003 |
-| **Exact repeat** | **0** — hash lookup | **$0** |
-| **Search** | **0** | ~$0.0000001 |
-| **Add / edit manually** | **0** | ~$0.0000001 |
-| **Forget / erase** | **0** | **$0** |
-| Run Dream | 1 per cluster | ~$0.0004 |
+```bash
+git clone https://github.com/Mamlesh18/MemDream.git && cd MemDream
+cp .env.example .env            # model keys and database
+docker compose up --build       # or: uvicorn app.main:app
+```
 
-Input dominates by roughly 15:1, so if you want to reduce spend, shrink what you
-send rather than what comes back. Live figures at `GET /v1/metrics/tokens`, broken
-down by operation, and per-user at `GET /v1/dream/stats`.
+Your code then swaps one line and keeps every method:
+
+```python
+from memdream import DreamClient
+mem = DreamClient("http://localhost:8000", user_id="alice")   # instead of MemDream(...)
+```
+
+`console.html` is a single-file web console for a running service: live
+decisions, memory inspector, audit trail and token costs. Deployment, scaling and
+the REST endpoints: [`docs/self-hosting.md`](docs/self-hosting.md) · [`docs/api.md`](docs/api.md).
 
 ---
 
@@ -593,16 +452,14 @@ down by operation, and per-user at `GET /v1/dream/stats`.
 
 | | |
 |---|---|
-| [`docs/concepts.md`](docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream — start here |
-| [`docs/sdk.md`](docs/sdk.md) | Python SDK reference, embedded and hosted |
-| [`docs/prompts.md`](docs/prompts.md) | Writing your own prompts — MemDream ships none |
-| [`docs/api.md`](docs/api.md) | REST API reference — every endpoint |
-| [`docs/self-hosting.md`](docs/self-hosting.md) | Deploying and configuring the service |
-| [`docs/diagrams.md`](docs/diagrams.md) | Architecture diagrams |
-| [`docs/how-it-works.md`](docs/how-it-works.md) | Technical walkthrough with code references |
-| [`docs/architecture.md`](docs/architecture.md) | Why each decision went the way it did |
+| [`docs/sdk.md`](docs/sdk.md) | Every method and argument — start here |
+| [`docs/prompts.md`](docs/prompts.md) | Writing your own prompts |
+| [`docs/concepts.md`](docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream |
 | [`config/dream.yaml`](config/dream.yaml) | Every tunable, annotated |
 | [`examples/`](examples/) | Runnable integrations |
+| [`docs/how-it-works.md`](docs/how-it-works.md) | Technical walkthrough with code references |
+| [`docs/architecture.md`](docs/architecture.md) | Why each design decision went the way it did |
+| [`docs/self-hosting.md`](docs/self-hosting.md) · [`docs/api.md`](docs/api.md) | The optional HTTP service |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
 
 ---
@@ -611,28 +468,21 @@ down by operation, and per-user at `GET /v1/dream/stats`.
 
 Alpha. The interfaces are settled; the tuning is not.
 
-- **FAISS is in-process.** The index is a file shared between API and worker via a
-  volume, with an inter-process lock and atomic replace. Correct for a handful of
-  processes on shared storage, not for horizontal scale-out. Beyond that,
-  implement `VectorStore` against a vector *server*. MongoDB holds every
-  embedding, so `scripts/rebuild_index.py` regenerates the index at any time.
 - **Extraction quality dominates everything downstream.** A fact extracted
-  ambiguously will be consolidated ambiguously.
+  ambiguously will be consolidated ambiguously — tune `extraction.md` first.
+- **The default FAISS index is local files.** Fine for one machine. If several
+  machines share one memory, use a vector server (Qdrant, pgvector, …).
 - **Sensitivity is a single flag.** `allow_sensitive` covers credentials, health,
-  financial and address data together, so you cannot currently keep allergies
-  while refusing API keys. Per-category policy is planned.
+  financial and address data together, so you cannot yet keep allergies while
+  refusing API keys. Per-category policy is planned.
 
 ---
 
 ## Contributing
 
-Contributions are very welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-Good first issues: a new provider adapter (OpenAI, Ollama, Qdrant, pgvector),
-extraction prompts for a new vertical, or evaluation cases that expose a failure
-mode we do not handle.
-
----
+Contributions are very welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Good
+first issues: a new provider adapter, starter prompts for a new vertical, or
+evaluation cases that expose a failure mode we do not handle.
 
 ## License
 
