@@ -15,11 +15,33 @@ import hmac
 import re
 
 from memdream.engine.core.config import Settings, get_settings
-from memdream.engine.core.exceptions import ValidationError
+from memdream.engine.core.exceptions import ConfigurationError, ValidationError
 from memdream.engine.models.scope import MemoryScope
 
 _NON_DIGITS = re.compile(r"[^\d+]")
 _VALID_E164 = re.compile(r"^\+?[1-9]\d{6,17}$")
+
+#: Salts anyone can read: the built-in default and the `.env.example`
+#: placeholder. With one of these, a phone number's user id is computable by
+#: anyone who has the repository — and switching to a real salt later
+#: re-partitions every user, so the mistake cannot be quietly fixed afterwards.
+PUBLISHED_SALTS = frozenset({"", "dream-memory-default-salt", "change-me-to-a-long-random-string"})
+
+
+def _salt(settings: Settings) -> str:
+    """The configured salt, refusing a published one before any id is derived."""
+    salt = settings.identity_salt
+    if salt.strip() in PUBLISHED_SALTS:
+        raise ConfigurationError(
+            "Deriving user ids from phone numbers needs a private salt, and "
+            "DREAM_IDENTITY_SALT is unset or still a published placeholder. Set it "
+            "to a long random value once and never change it (changing it later "
+            "re-partitions every user):\n"
+            "    DREAM_IDENTITY_SALT=$(python -c \"import secrets; print(secrets.token_urlsafe(32))\")\n"
+            "or MemDream(..., identity_salt=...). Callers that pass user_id "
+            "instead of phone_number do not need a salt."
+        )
+    return salt
 
 
 def normalize_phone_number(phone_number: str) -> str:
@@ -59,7 +81,7 @@ def hash_phone_number(phone_number: str, settings: Settings | None = None) -> st
     """Salted hash of a normalised phone number, stable across tenants."""
     settings = settings or get_settings()
     normalized = normalize_phone_number(phone_number)
-    return _digest(settings.identity_salt, "phone", normalized)[:32]
+    return _digest(_salt(settings), "phone", normalized)[:32]
 
 
 def derive_user_id(
@@ -84,7 +106,7 @@ def derive_user_id(
     # `bot_id` is the previous name for `agent_id`.
     agent_id = agent_id or bot_id
     normalized = normalize_phone_number(phone_number)
-    digest = _digest(settings.identity_salt, "user", client_id or "", agent_id or "", normalized)
+    digest = _digest(_salt(settings), "user", client_id or "", agent_id or "", normalized)
     return f"user_{digest[:24]}"
 
 

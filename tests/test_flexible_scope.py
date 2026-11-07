@@ -246,3 +246,36 @@ async def test_namespace_dimensions_isolate(container, store_memory):
 
     assert len(await container.memories.find(prod, limit=10)) == 1
     assert await container.memories.find(staging, limit=10) == []
+
+
+# --------------------------------------------------------------------------- #
+# The identity salt
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "salt", ["dream-memory-default-salt", "change-me-to-a-long-random-string", ""]
+)
+async def test_phone_identity_refuses_a_published_salt(salt):
+    """A salt anyone can read makes every derived user id computable."""
+    from memdream.engine.core.config import Settings
+    from memdream.engine.core.exceptions import ConfigurationError
+    from memdream.engine.core.identity import build_scope
+
+    settings = Settings(env="test", identity_salt=salt)
+    with pytest.raises(ConfigurationError, match="DREAM_IDENTITY_SALT"):
+        build_scope(phone_number="+919999999999", settings=settings)
+
+
+async def test_a_private_salt_derives_ids_and_user_id_callers_need_none():
+    from memdream.engine.core.config import Settings
+    from memdream.engine.core.identity import build_scope
+
+    private = Settings(env="test", identity_salt="a-private-salt-for-this-test")
+    assert build_scope(phone_number="+919999999999", settings=private).user_id.startswith(
+        "user_"
+    )
+
+    # No phone number, no salt involved: the published default is harmless here.
+    default = Settings(env="test")
+    assert build_scope(user_id="alice", settings=default).user_id == "alice"

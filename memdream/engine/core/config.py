@@ -721,6 +721,9 @@ class Settings(BaseSettings):
     prompts: dict[str, str] = Field(default_factory=dict)
 
     # --- privacy ---------------------------------------------------------- #
+    #: Only used to derive user ids from phone numbers. The default is public —
+    #: it is in this file — so `core.identity` refuses to use it; see
+    #: `PUBLISHED_SALTS`.
     identity_salt: str = "dream-memory-default-salt"
 
     # --- observability ---------------------------------------------------- #

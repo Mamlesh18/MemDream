@@ -157,7 +157,7 @@ Treat prompts as code — review them, and version them with the service. See
 
 | Variable | Default | |
 |---|---|---|
-| `DREAM_IDENTITY_SALT` | *(insecure default)* | **Set this.** Salt for deriving user ids from phone numbers. Changing it later changes every derived id, so pick a long random value once and keep it |
+| `DREAM_IDENTITY_SALT` | *(none)* | **Required if you identify users by phone number** — MemDream refuses to derive ids with the built-in or `.env.example` placeholder. Changing it later changes every derived id, so pick a long random value once and keep it. Not needed when you pass `userId` |
 | `DREAM_DOMAIN` | empty | one sentence describing your deployment, injected into extraction and decisions. See [your prompts, your domain](concepts.md#your-prompts-your-domain) |
 | `DREAM_ENV` | `local` | free-form environment label |
 | `DREAM_LOG_LEVEL` | `INFO` | |
