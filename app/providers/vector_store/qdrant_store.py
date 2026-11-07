@@ -1,6 +1,6 @@
 """Qdrant vector store.
 
-    pip install memdream[qdrant]
+    pip install 'memdream[qdrant] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 One shared collection, isolated by an indexed payload filter on the tenancy
 triple. Collection-per-tenant was the alternative and is worse at scale: Qdrant
@@ -50,7 +50,7 @@ class QdrantVectorStore(VectorStore):
             from qdrant_client import AsyncQdrantClient
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "qdrant-client is required. Install with: pip install memdream[qdrant]"
+                "qdrant-client is required. Install with: pip install 'memdream[qdrant] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         self._client = AsyncQdrantClient(url=url, api_key=api_key, timeout=int(timeout))

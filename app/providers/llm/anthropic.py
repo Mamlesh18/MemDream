@@ -1,6 +1,6 @@
 """Anthropic Claude.
 
-    pip install memdream[anthropic]
+    pip install 'memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 Claude has no JSON mode, so structured output is obtained differently: the
 assistant turn is **prefilled with an opening brace**. The model can only
@@ -70,7 +70,7 @@ class AnthropicLLMProvider(LLMProvider):
             from anthropic import AsyncAnthropic
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "anthropic is required. Install with: pip install memdream[anthropic]"
+                "anthropic is required. Install with: pip install 'memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if not api_key:

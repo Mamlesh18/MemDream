@@ -1,6 +1,6 @@
 """PostgreSQL connection and schema.
 
-    pip install memdream[postgres]
+    pip install 'memdream[postgres] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 ## Why the schema looks like this
 
@@ -263,7 +263,7 @@ class PostgresDatabase(Database):
             import asyncpg
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "asyncpg is required. Install with: pip install memdream[postgres]"
+                "asyncpg is required. Install with: pip install 'memdream[postgres] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         async def _init(connection: Any) -> None:

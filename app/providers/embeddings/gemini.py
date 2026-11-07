@@ -1,6 +1,6 @@
 """Google Gemini embeddings.
 
-    pip install memdream[gemini]
+    pip install 'memdream[gemini] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 `gemini-embedding-001` supports Matryoshka truncation, so the output width is
 selectable — 768 by default here rather than the maximum, because a memory layer
@@ -51,7 +51,7 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
             from google import genai
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "google-genai is required. Install with: pip install memdream[gemini]"
+                "google-genai is required. Install with: pip install 'memdream[gemini] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if not api_key:

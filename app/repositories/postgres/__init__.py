@@ -1,6 +1,6 @@
 """PostgreSQL implementation of the persistence contract.
 
-    pip install memdream[postgres]
+    pip install 'memdream[postgres] @ git+https://github.com/Mamlesh18/MemDream.git'
     DREAM_DATABASE_PROVIDER=postgres
     DREAM_POSTGRES_DSN=postgresql://user:pass@localhost:5432/memdream
 

@@ -1,6 +1,6 @@
 """Milvus / Zilliz vector store.
 
-    pip install memdream[milvus]
+    pip install 'memdream[milvus] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 Uses `MilvusClient`, which works against a local Milvus, a Zilliz Cloud cluster,
 or Milvus Lite (pass a file path as the URI for an embedded, no-server setup).
@@ -50,7 +50,7 @@ class MilvusVectorStore(VectorStore):
             from pymilvus import MilvusClient
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "pymilvus is required. Install with: pip install memdream[milvus]"
+                "pymilvus is required. Install with: pip install 'memdream[milvus] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         self._client = MilvusClient(uri=uri, token=token or "")

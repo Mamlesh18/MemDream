@@ -1,6 +1,6 @@
 """ChromaDB vector store.
 
-    pip install memdream[chroma]
+    pip install 'memdream[chroma] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 The easiest local start: embedded mode persists to a directory, so there is no
 server to run. Point it at a host instead for the client/server deployment.
@@ -42,7 +42,7 @@ class ChromaVectorStore(VectorStore):
             import chromadb
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "chromadb is required. Install with: pip install memdream[chroma]"
+                "chromadb is required. Install with: pip install 'memdream[chroma] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if host:

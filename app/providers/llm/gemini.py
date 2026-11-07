@@ -1,6 +1,6 @@
 """Google Gemini.
 
-    pip install memdream[gemini]
+    pip install 'memdream[gemini] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 Gemini exposes an OpenAI-compatible endpoint, and using it would have been the
 cheap option — but it is a compatibility shim, and the native SDK gives two
@@ -68,7 +68,7 @@ class GeminiLLMProvider(LLMProvider):
             from google import genai
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "google-genai is required. Install with: pip install memdream[gemini]"
+                "google-genai is required. Install with: pip install 'memdream[gemini] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if not api_key:

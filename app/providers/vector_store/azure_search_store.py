@@ -1,6 +1,6 @@
 """Azure AI Search vector store.
 
-    pip install memdream[azure-search]
+    pip install 'memdream[azure-search] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 The natural pairing for a deployment already on Azure OpenAI: same cloud, same
 identity story, no extra vendor.
@@ -49,7 +49,7 @@ class AzureSearchVectorStore(VectorStore):
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
                 "azure-search-documents is required. "
-                "Install with: pip install memdream[azure-search]"
+                "Install with: pip install 'memdream[azure-search] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if not endpoint or not api_key:

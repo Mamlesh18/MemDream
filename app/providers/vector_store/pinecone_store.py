@@ -1,6 +1,6 @@
 """Pinecone vector store.
 
-    pip install memdream[pinecone]
+    pip install 'memdream[pinecone] @ git+https://github.com/Mamlesh18/MemDream.git'
 
 Pinecone is the best structural fit of the hosted stores, because it has
 **namespaces**: a first-class partition inside an index. One namespace per
@@ -48,7 +48,7 @@ class PineconeVectorStore(VectorStore):
             from pinecone import Pinecone
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "pinecone is required. Install with: pip install memdream[pinecone]"
+                "pinecone is required. Install with: pip install 'memdream[pinecone] @ git+https://github.com/Mamlesh18/MemDream.git'"
             ) from exc
 
         if not api_key:
