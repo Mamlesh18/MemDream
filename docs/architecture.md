@@ -1,7 +1,20 @@
 # Architecture
 
-This document covers how Dream Memory is put together and, more usefully, why
+This document covers how MemDream is put together and, more usefully, why
 each load-bearing decision went the way it did.
+
+## 0. One engine, two front doors
+
+MemDream is a library first. `MemDream` / `AsyncMemDream` (`memdream/embedded.py`)
+build the whole engine inside the caller's process — no server, no worker. The
+optional HTTP service (`app/main.py`, called through `DreamClient`) builds the
+**same** engine for deployments where several apps share one memory.
+
+Both go through one composition root, `DreamContainer.create` in
+`app/container.py`, so there is no second wiring path that could drift. Both
+also start the same daily consolidation clock (`app/dream/scheduler.py`): the
+API in its lifespan, the library on first use unless `auto_dream=False`.
+Everything below applies to either.
 
 ---
 
@@ -28,48 +41,55 @@ Everything below follows from those four.
 
 ```
         ┌──────────────────────────────┐
-        │           MongoDB            │   source of truth
+        │  MongoDB  or  PostgreSQL     │   source of truth
         │  memories · relations        │   every field, every embedding
         │  dream_operations · jobs     │
         └──────────────┬───────────────┘
                        │  derived, disposable
                        ▼
         ┌──────────────────────────────┐
-        │            FAISS             │   semantic index only
-        │  one partition per tenant    │
+        │  vector index                │   semantic index only
+        │  FAISS by default; Qdrant,   │
+        │  pgvector, Chroma, Pinecone, │
+        │  Milvus, Azure AI Search     │
         └──────────────────────────────┘
 ```
 
-Mongo holds the canonical record, including the embedding. FAISS holds a copy of
-the vector and nothing else.
+The canonical store (`app/repositories/`, Mongo or Postgres behind one
+interface) holds the full record, including the embedding. The vector index
+holds a copy of the vector and nothing else. `database="memory"` in the library
+swaps in an in-process stand-in for Mongo, with the vector index in memory too,
+for trying MemDream and for tests.
 
 This split is what makes the index disposable. Corrupt it, delete it, change
-embedding model — `scripts/rebuild_index.py` regenerates it from Mongo. If the
-vector store were the source of truth, an index problem would be a data-loss
-event.
+embedding model — `scripts/rebuild_index.py` regenerates it from the canonical
+store. If the vector store were the source of truth, an index problem would be a
+data-loss event.
 
 It also means metadata filtering happens in a database that is good at it. The
 retrieval path is:
 
 ```
-Mongo: scope + status + type + validity window  →  set of eligible ids
-FAISS: rank *only those ids* by similarity
-Ranker: blend similarity with importance, confidence, recency, status
+Canonical store: scope + status + type + validity window  →  set of eligible ids
+Vector index:    rank *only those ids* by similarity
+Ranker:          blend similarity with importance, confidence, recency, status
 ```
 
 Filter first, then rank. The other order — take the top-k vector hits and filter
 afterwards — lets a superseded or out-of-window memory push a valid one out of
 the result set before you ever get to look at it.
 
-### Why MongoDB
+### Why MongoDB first, and Postgres too
 
 Memory documents are irregular by nature: an open `metadata` bag, a variable
 `sourceMemoryIds` list, an optional embedding array of a model-dependent width.
 A document store fits that without migrations every time a memory type acquires
-a field.
+a field. Postgres is supported for teams that already run it; its columns are
+named after the model fields (`app/repositories/postgres/_sql.py`), so the
+mapping layer is the model itself.
 
-The cost is no multi-document transaction by default, and supersede touches
-several documents. Section 6 covers how ordering is chosen so that a crash
+On Mongo the cost is no multi-document transaction by default, and supersede
+touches several documents. Section 6 covers how ordering is chosen so that a crash
 mid-operation is recoverable rather than lossy.
 
 ### Why FAISS, and how tenancy works
@@ -78,17 +98,22 @@ FAISS has no metadata filter. A single shared index would mean fetching
 neighbours and *then* discarding other tenants' rows — a design where one
 filtering bug is a data leak.
 
-So the index is partitioned physically: one FAISS index file per
-`(clientId, botId, userId)`, named by a SHA-256 of the triple. Cross-tenant
-retrieval is not something the code avoids; it is something the code cannot
-express, because the vectors are in a different file.
+So the index is partitioned physically: one FAISS index file per scope, named
+by the scope's `scopeKey` — a SHA-256 digest over every dimension the scope has
+(`user_id`, plus `agent_id`, `client_id` and `namespace` when supplied).
+Cross-tenant retrieval is not something the code avoids; it is something the
+code cannot express, because the vectors are in a different file. Server-based
+vector stores have no files to separate, so each expresses the same guarantee as
+a namespace or a filter (`app/providers/vector_store/_scope_keys.py`), and the
+conformance suite checks every one.
 
 Partitioning has a second benefit. Each index holds one user's memories —
 hundreds to low thousands — which is small enough that `IndexFlatIP` over
 L2-normalised vectors is exact cosine search with no approximation and no
 training step.
 
-Two processes write (the API and the worker). Correctness comes from three
+Several processes may write the same index — library instances in different
+processes, or the API and its optional worker. Correctness comes from three
 things: an inter-process `FileLock` around every read-modify-write, an mtime
 check that reloads a partition another process has changed, and a temp-file +
 `os.replace` write so a crash cannot leave a torn index. All FAISS work runs in
@@ -105,7 +130,14 @@ Three mechanisms, deliberately overlapping.
 
 **Structural.** Every repository method takes a `MemoryScope`. There is no
 method that reads or writes a memory without one, so a caller cannot forget the
-filter — there is nothing to forget.
+filter — there is nothing to forget. The filter is a single indexed equality on
+`scopeKey` rather than a predicate over optional fields, because null-versus-
+missing on each optional dimension is exactly how a query quietly matches the
+wrong partition.
+
+`user_id` is the only required dimension. With nothing else supplied it *is* the
+boundary, so two customers writing the same raw `user_id` share a partition —
+callers supplying their own ids should namespace them or pass `client_id`.
 
 **Physical.** FAISS partitions per scope, as above.
 
@@ -117,18 +149,18 @@ assertion costs a dict comparison.
 
 ### Identity
 
-The API accepts a phone number, because that is what messaging platforms have.
-It is immediately turned into:
+Most callers pass a `user_id` of their own. A phone number is also accepted,
+because that is what messaging platforms have, and is immediately turned into:
 
 ```
-userId          = "user_" + HMAC-SHA256(salt, "user" | clientId | botId | E.164)[:24]
+userId          = "user_" + HMAC-SHA256(salt, "user" | clientId | agentId | E.164)[:24]
 phoneNumberHash =          HMAC-SHA256(salt, "phone" | E.164)[:32]
 ```
 
 and the raw number is dropped. It is never written into memory content, and the
 extraction prompt forbids it explicitly.
 
-`userId` is salted **per (client, bot)**. The same person contacting two clients
+A derived `userId` is salted **per (client, agent)**. The same person contacting two clients
 gets two unrelated identifiers, so identity cannot be correlated across tenants
 by comparing stored ids — which would otherwise be a real leak in a
 multi-tenant deployment where several clients serve overlapping user bases.
@@ -142,6 +174,9 @@ re-partitions.
 
 ```
 prompt
+  │
+  ├─ triage ────────────────────── greetings and pure questions stop here,
+  │                                no LLM call (app/memory/triage.py)
   │
   ├─ extraction (LLM) ──────────── one message may hold several facts
   │
@@ -414,10 +449,9 @@ last week is current knowledge even if first learned years ago.
 
 ## 10. Operational notes
 
-**Scaling.** The API is stateless apart from the FAISS files. To run more than a
-few replicas, implement `VectorStore` against a vector *server* (Qdrant,
-pgvector, Azure AI Search) — the interface is four methods and every caller
-already passes a scope. Nothing else changes.
+**Scaling.** Library and API alike are stateless apart from the FAISS files. To
+run on more than one machine, pick a vector *server* (Qdrant, pgvector, Azure AI
+Search, …) — every caller already passes a scope. Nothing else changes.
 
 **The queue.** No broker, and not because one was hard to add — because the
 workload does not justify one. Synthesis is idempotent and its trigger is a
@@ -430,7 +464,7 @@ same coroutines the API does, with no `asyncio.run()` bridge inside a sync task
 and no second code path to keep correct. `JobQueue` is four methods if you
 prefer Celery, SQS, Service Bus or Temporal.
 
-**Job state lives in Mongo, not the queue.** The queue carries only a job id.
+**Job state lives in the canonical store, not the queue.** The queue carries only a job id.
 Status is answerable whatever broker is installed, and a flushed queue loses
 scheduling but never the record that work was requested.
 
@@ -441,32 +475,41 @@ failing the caller's request would be a lie. One cluster failing does not fail a
 synthesis run.
 
 **Observability.** Structured logs carry `request_id`, `operation_id` and the
-scope triple through context variables, so a decision traces end to end without
+scope through context variables, so a decision traces end to end without
 threading a logger through the call stack. Counters and latency histograms are
-at `GET /v1/metrics`, and mirror to OpenTelemetry when `DREAM_OTEL_ENABLED=true`.
+at `GET /v1/metrics` on the service (`mem.stats()` in the library), and mirror
+to OpenTelemetry when `DREAM_OTEL_ENABLED=true`. As a library MemDream logs only
+warnings, to stderr, and never reconfigures the host application's logging.
 
 ---
 
 ## 11. Module map
 
 ```
+memdream/
+  embedded.py          MemDream / AsyncMemDream — the library, in-process
+  client.py            DreamClient / AsyncDreamClient — same surface over HTTP
+  models.py            return types shared by both
+  __main__.py          `python -m memdream prompts ./prompts`
+
 app/
-  main.py              FastAPI app, middleware, error translation
   container.py         composition root — the only place providers are constructed
+  main.py              optional FastAPI service, middleware, error translation
 
   api/                 routes; deps.py owns auth and scope resolution
-  core/                config, logging, metrics, exceptions, identity, policy
+  core/                config, shorthand, prompts, logging, metrics, exceptions,
+                       identity, policy
   models/              Memory, MemoryScope, DreamDecision, DreamJob, requests
-  memory/              extractor, retriever, ranker, lifecycle, service
+  memory/              triage, extractor, retriever, ranker, lifecycle, service
   dream/               engine, supersede, merge, synthesis, clustering,
-                       candidate_selector, validation, prompts
+                       candidate_selector, validation, consolidation,
+                       compaction, scheduler, prompts
   providers/           llm, embeddings, vector_store, queue — each with a base
-                       class, a concrete implementation, and an
-                       offline implementation
-  repositories/        Mongo access; every method takes a MemoryScope
+                       class, concrete implementations, and an offline one
+  repositories/        mongo/ and postgres/; every method takes a MemoryScope
   workers/             optional worker for DREAM_QUEUE_PROVIDER=database
 ```
 
 `app/memory` and `app/dream` import provider **base classes** only. That is the
-invariant that keeps Azure OpenAI a first implementation rather than a
+invariant that keeps every provider an implementation rather than a
 dependency, and it is worth preserving.
