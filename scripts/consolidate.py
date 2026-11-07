@@ -22,11 +22,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.container import DreamContainer  # noqa: E402
-from app.core.config import get_settings  # noqa: E402
-from app.core.logging import configure_logging  # noqa: E402
-from app.models.enums import MemoryStatus  # noqa: E402
-from app.models.scope import MemoryScope  # noqa: E402
+from memdream.engine.container import DreamContainer  # noqa: E402
+from memdream.engine.core.config import get_settings  # noqa: E402
+from memdream.engine.core.logging import configure_logging  # noqa: E402
+from memdream.engine.models.enums import MemoryStatus  # noqa: E402
+from memdream.engine.models.scope import MemoryScope  # noqa: E402
 
 
 async def report(container, scope, args) -> tuple[int, int]:

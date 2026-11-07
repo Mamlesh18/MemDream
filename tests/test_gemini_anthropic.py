@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.config import Settings
-from app.core.exceptions import ConfigurationError, ProviderError
-from app.providers.embeddings.factory import build_embedding_provider
-from app.providers.llm.factory import build_llm_provider
+from memdream.engine.core.config import Settings
+from memdream.engine.core.exceptions import ConfigurationError, ProviderError
+from memdream.engine.providers.embeddings.factory import build_embedding_provider
+from memdream.engine.providers.llm.factory import build_llm_provider
 
 pytestmark = pytest.mark.asyncio
 
@@ -136,7 +136,7 @@ async def test_a_missing_key_names_the_variable_to_set(provider, module, expecte
 
 async def test_gemini_labels_itself_for_metrics_and_audit():
     pytest.importorskip("google.genai")
-    from app.providers.llm.gemini import GeminiLLMProvider
+    from memdream.engine.providers.llm.gemini import GeminiLLMProvider
 
     provider = GeminiLLMProvider(api_key="k", model="gemini-2.0-flash")
     # Metrics, audit rows and logs all key off this.
@@ -145,7 +145,7 @@ async def test_gemini_labels_itself_for_metrics_and_audit():
 
 async def test_gemini_embeddings_report_the_configured_width():
     pytest.importorskip("google.genai")
-    from app.providers.embeddings.gemini import GeminiEmbeddingProvider
+    from memdream.engine.providers.embeddings.gemini import GeminiEmbeddingProvider
 
     provider = GeminiEmbeddingProvider(api_key="k", dimensions=1536)
 
@@ -156,7 +156,7 @@ async def test_gemini_embeddings_report_the_configured_width():
 async def test_gemini_asks_for_json_as_a_decoding_constraint(monkeypatch):
     """The whole reason the native SDK is used instead of the OpenAI shim."""
     pytest.importorskip("google.genai")
-    from app.providers.llm.gemini import GeminiLLMProvider
+    from memdream.engine.providers.llm.gemini import GeminiLLMProvider
 
     provider = GeminiLLMProvider(api_key="k")
     captured: dict = {}
@@ -179,7 +179,7 @@ async def test_gemini_embeddings_are_normalised(monkeypatch):
     here uses inner product assuming they are — so an un-normalised vector would
     quietly distort every similarity score."""
     pytest.importorskip("google.genai")
-    from app.providers.embeddings.gemini import GeminiEmbeddingProvider
+    from memdream.engine.providers.embeddings.gemini import GeminiEmbeddingProvider
 
     provider = GeminiEmbeddingProvider(api_key="k", dimensions=3)
 
@@ -204,8 +204,8 @@ async def test_gemini_says_when_it_returned_nothing(monkeypatch):
     """A safety block produces an empty response. Saying so beats a
     no-JSON-found error several frames further down."""
     pytest.importorskip("google.genai")
-    from app.core.exceptions import LLMResponseError
-    from app.providers.llm.gemini import GeminiLLMProvider
+    from memdream.engine.core.exceptions import LLMResponseError
+    from memdream.engine.providers.llm.gemini import GeminiLLMProvider
 
     provider = GeminiLLMProvider(api_key="k")
 
@@ -230,7 +230,7 @@ async def test_gemini_says_when_it_returned_nothing(monkeypatch):
 
 async def test_anthropic_labels_itself_for_metrics_and_audit():
     pytest.importorskip("anthropic")
-    from app.providers.llm.anthropic import AnthropicLLMProvider
+    from memdream.engine.providers.llm.anthropic import AnthropicLLMProvider
 
     provider = AnthropicLLMProvider(api_key="k", model="claude-sonnet-4-5")
     assert provider.model_name == "anthropic:claude-sonnet-4-5"
@@ -245,7 +245,7 @@ async def test_anthropic_prefills_the_assistant_turn_with_a_brace(monkeypatch):
     pytest.importorskip("anthropic")
     from pydantic import BaseModel
 
-    from app.providers.llm.anthropic import AnthropicLLMProvider
+    from memdream.engine.providers.llm.anthropic import AnthropicLLMProvider
 
     class Decision(BaseModel):
         decision: str
@@ -292,7 +292,7 @@ async def test_anthropic_repairs_a_response_that_fails_validation(monkeypatch):
     pytest.importorskip("anthropic")
     from pydantic import BaseModel
 
-    from app.providers.llm.anthropic import AnthropicLLMProvider
+    from memdream.engine.providers.llm.anthropic import AnthropicLLMProvider
 
     class Decision(BaseModel):
         decision: str
@@ -338,8 +338,8 @@ async def test_anthropic_names_truncation_rather_than_letting_json_fail(monkeypa
     """max_tokens truncation produces unterminated JSON. Naming the cause is
     actionable; a parse error at character 811 is not."""
     pytest.importorskip("anthropic")
-    from app.core.exceptions import LLMResponseError
-    from app.providers.llm.anthropic import AnthropicLLMProvider
+    from memdream.engine.core.exceptions import LLMResponseError
+    from memdream.engine.providers.llm.anthropic import AnthropicLLMProvider
 
     provider = AnthropicLLMProvider(api_key="k")
 

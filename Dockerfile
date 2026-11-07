@@ -19,7 +19,6 @@ RUN apt-get update \
 
 # Dependencies first, so a source change does not invalidate the install layer.
 COPY pyproject.toml README.md ./
-COPY app ./app
 COPY memdream ./memdream
 COPY prompts ./prompts
 
@@ -47,4 +46,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "memdream.engine.main:app", "--host", "0.0.0.0", "--port", "8000"]

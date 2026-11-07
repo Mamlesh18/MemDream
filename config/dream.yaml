@@ -2,7 +2,7 @@
 #
 # Loaded when DREAM_CONFIG_FILE points at this file. Environment variables
 # override anything here (DREAM_RETRIEVAL__TOP_K=20), and this file overrides the
-# defaults in app/core/config.py. Infrastructure settings — connection strings,
+# defaults in memdream/engine/core/config.py. Infrastructure settings — connection strings,
 # credentials, provider selection — belong in the environment, not here.
 #
 # Similarity thresholds are MEASURED against Azure OpenAI

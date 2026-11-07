@@ -862,7 +862,7 @@ async function doDream() {
         no broker, nothing else to deploy. That is the default.</p>
         <p><code>database</code> is the alternative, for several API replicas sharing one
         queue — it needs a worker process
-        (<code>python -m app.workers.synthesis_worker</code>).</p>`);
+        (<code>python -m memdream.engine.workers.synthesis_worker</code>).</p>`);
       return;
     }
 

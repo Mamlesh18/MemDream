@@ -24,8 +24,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from app.models.scope import MemoryScope
-from app.providers.vector_store.base import VectorRecord, VectorStore
+from memdream.engine.models.scope import MemoryScope
+from memdream.engine.providers.vector_store.base import VectorRecord, VectorStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,7 +55,7 @@ def scope_of(client: str = "acme", bot: str = "support", user: str = "u1") -> Me
 
 
 async def _memory_store() -> AsyncIterator[VectorStore]:
-    from app.providers.vector_store.memory_store import InMemoryVectorStore
+    from memdream.engine.providers.vector_store.memory_store import InMemoryVectorStore
 
     store = InMemoryVectorStore()
     yield store
@@ -64,7 +64,7 @@ async def _memory_store() -> AsyncIterator[VectorStore]:
 
 async def _faiss_store() -> AsyncIterator[VectorStore]:
     pytest.importorskip("faiss", reason="faiss-cpu not installed")
-    from app.providers.vector_store.faiss_store import FaissVectorStore
+    from memdream.engine.providers.vector_store.faiss_store import FaissVectorStore
 
     with tempfile.TemporaryDirectory() as directory:
         store = FaissVectorStore(path=directory, dimensions=DIM)
@@ -78,7 +78,7 @@ async def _qdrant_store() -> AsyncIterator[VectorStore]:
     if not url:
         pytest.skip("set DREAM_TEST_QDRANT_URL to run the Qdrant conformance suite")
 
-    from app.providers.vector_store.qdrant_store import QdrantVectorStore
+    from memdream.engine.providers.vector_store.qdrant_store import QdrantVectorStore
 
     store = QdrantVectorStore(url=url, collection="memdream_conformance", dimensions=DIM)
     yield store
@@ -91,7 +91,7 @@ async def _pgvector_store() -> AsyncIterator[VectorStore]:
     if not dsn:
         pytest.skip("set DREAM_TEST_POSTGRES_DSN to run the pgvector conformance suite")
 
-    from app.providers.vector_store.pgvector_store import PgVectorStore
+    from memdream.engine.providers.vector_store.pgvector_store import PgVectorStore
 
     store = PgVectorStore(dsn=dsn, table="memdream_conformance", dimensions=DIM)
     yield store
@@ -100,7 +100,7 @@ async def _pgvector_store() -> AsyncIterator[VectorStore]:
 
 async def _chroma_store() -> AsyncIterator[VectorStore]:
     pytest.importorskip("chromadb", reason="chromadb not installed")
-    from app.providers.vector_store.chroma_store import ChromaVectorStore
+    from memdream.engine.providers.vector_store.chroma_store import ChromaVectorStore
 
     # ignore_cleanup_errors: Chroma keeps its SQLite file open, and on Windows
     # that blocks removal of the temp directory. A harness detail, not a defect.
@@ -117,7 +117,7 @@ async def _pinecone_store() -> AsyncIterator[VectorStore]:
     if not (key and index):
         pytest.skip("set DREAM_TEST_PINECONE_API_KEY and DREAM_TEST_PINECONE_INDEX")
 
-    from app.providers.vector_store.pinecone_store import PineconeVectorStore
+    from memdream.engine.providers.vector_store.pinecone_store import PineconeVectorStore
 
     store = PineconeVectorStore(api_key=key, index_name=index, dimensions=DIM)
     yield store

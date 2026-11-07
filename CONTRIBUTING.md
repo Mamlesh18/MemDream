@@ -114,11 +114,11 @@ impossible for a model to reach another tenant's memory by guessing an id — th
 id never becomes a query. Do not add a path that looks up an id straight from
 model output.
 
-### 5. `app/memory` and `app/dream` import provider *base classes* only
+### 5. `memdream/engine/memory` and `memdream/engine/dream` import provider *base classes* only
 
 Never a concrete provider. This is the invariant that keeps Azure OpenAI a first
 implementation rather than a dependency. Construction happens in
-`app/container.py`, the composition root.
+`memdream/engine/container.py`, the composition root.
 
 ### 6. Synthesis is idempotent and additive
 
@@ -150,7 +150,7 @@ measures where the similarity bands actually fall. We have measured
 
 ## Prompt changes
 
-Prompts live in one file, [`app/dream/prompts.py`](app/dream/prompts.py). They
+Prompts live in one file, [`memdream/engine/dream/prompts.py`](memdream/engine/dream/prompts.py). They
 are the highest-leverage code in the project and the easiest to get subtly wrong.
 
 Before and after any prompt change:

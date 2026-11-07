@@ -24,10 +24,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.config import get_settings
-from app.core.logging import configure_logging
-from app.providers.embeddings.base import cosine_similarity
-from app.providers.embeddings.factory import build_embedding_provider
+from memdream.engine.core.config import get_settings
+from memdream.engine.core.logging import configure_logging
+from memdream.engine.providers.embeddings.base import cosine_similarity
+from memdream.engine.providers.embeddings.factory import build_embedding_provider
 
 # (label, text A, text B). Labels group into the four bands that matter.
 PAIRS: list[tuple[str, str, str]] = [

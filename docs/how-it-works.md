@@ -62,19 +62,19 @@ ids — job *state* lives in Mongo, so status is answerable whatever the broker 
 
 ### 2.1 Middleware and scope
 
-`app/main.py:94` assigns a request id and binds it to a context variable, so
+`memdream/engine/main.py:94` assigns a request id and binds it to a context variable, so
 every log line for this request carries it without threading a logger through
 the call stack.
 
-`app/api/deps.py:scope_from_request` builds the `MemoryScope` — the single
+`memdream/engine/api/deps.py:scope_from_request` builds the `MemoryScope` — the single
 `(clientId, botId, userId)` triple everything downstream is bound to. The phone
 number is hashed here and discarded (§4).
 
 ### 2.2 Extraction
 
-`app/memory/service.py:92` → `app/memory/extractor.py:extract`.
+`memdream/engine/memory/service.py:92` → `memdream/engine/memory/extractor.py:extract`.
 
-One LLM call, `EXTRACTION_SYSTEM` (`app/dream/prompts.py:28`). The user message
+One LLM call, `EXTRACTION_SYSTEM` (`memdream/engine/dream/prompts.py:28`). The user message
 is sent as a **JSON payload, not prose** — instructions live in the system
 prompt, data in the user message, so a memory reading "ignore previous
 instructions" is data.
@@ -90,7 +90,7 @@ yield several facts:
 
 ### 2.3 Policy
 
-`app/core/policy.py:MemoryPolicy.filter` — pure code, no model. Applies
+`memdream/engine/core/policy.py:MemoryPolicy.filter` — pure code, no model. Applies
 confidence and importance floors, type allow/block lists, the sensitivity rule,
 and a per-prompt cap. Rejections are *returned*, not dropped, so the reason
 reaches the audit log.
@@ -100,16 +100,16 @@ This is where a peanut allergy gets discarded under the default
 
 ### 2.4 Per-candidate loop
 
-`app/memory/service.py:127` — **sequential, not concurrent**. Each candidate is
+`memdream/engine/memory/service.py:127` — **sequential, not concurrent**. Each candidate is
 reasoned about against the state the previous one left behind. Running them in
 parallel would let a message stating the same fact twice produce two active
 memories, because both calls would see an empty candidate set.
 
-Each candidate goes through `DreamEngine.process` (`app/dream/engine.py:92`).
+Each candidate goes through `DreamEngine.process` (`memdream/engine/dream/engine.py:92`).
 
 ### 2.5 The engine pipeline
 
-`app/dream/engine.py:126` (`_process`), in order:
+`memdream/engine/dream/engine.py:126` (`_process`), in order:
 
 | Step | Code | Cost |
 |---|---|---|
@@ -150,7 +150,7 @@ the common single-fact case reads simply.
 
 ### 3.1 Collections
 
-`app/repositories/mongo.py`
+`memdream/engine/repositories/mongo.py`
 
 | Collection | Holds |
 |---|---|
@@ -171,7 +171,7 @@ source_memory_ids   (sourceMemoryIds)                      ← pattern staleness
 
 ### 3.2 The memory document
 
-`app/models/memory.py:Memory`. Fields that carry real semantics:
+`memdream/engine/models/memory.py:Memory`. Fields that carry real semantics:
 
 | Field | Meaning |
 |---|---|
@@ -189,7 +189,7 @@ to Bangalore in July" learned in August has `validFrom` July, `createdAt` August
 
 ### 3.3 FAISS
 
-`app/providers/vector_store/faiss_store.py`
+`memdream/engine/providers/vector_store/faiss_store.py`
 
 - **One index file per scope.** Filename is `sha256(clientId/botId/userId)[:40]`
   (`faiss_store.py:110`) — hashed so tenant ids never touch the filesystem.
@@ -225,7 +225,7 @@ have.
 
 ### Identity derivation
 
-`app/core/identity.py`
+`memdream/engine/core/identity.py`
 
 ```
 userId          = "user_" + HMAC-SHA256(salt, "user"  | clientId | botId | E.164)[:24]
@@ -244,7 +244,7 @@ re-partitions.
 
 ## 5. Retrieval
 
-`app/memory/retriever.py:121` (`search`)
+`memdream/engine/memory/retriever.py:121` (`search`)
 
 ```
 1. Mongo   eligible_ids()   scope + status + type + validity → allow-list
@@ -262,7 +262,7 @@ An empty allow-list short-circuits — and `faiss_store.py` treats
 
 ### The hybrid score
 
-`app/memory/ranker.py:score`
+`memdream/engine/memory/ranker.py:score`
 
 ```
 score = ( 0.60·similarity + 0.15·importance + 0.10·confidence
@@ -303,7 +303,7 @@ retired by an incoming raw fact.
 
 ## 6. The Dream engine
 
-`app/dream/engine.py`
+`memdream/engine/dream/engine.py`
 
 ### Decision modes
 
@@ -320,7 +320,7 @@ Set via `dream.decision_mode`.
 
 ### Prompt composition
 
-All prompt text lives in **one file**, `app/dream/prompts.py` (364 lines).
+All prompt text lives in **one file**, `memdream/engine/dream/prompts.py` (364 lines).
 
 ```
 _SUPERSEDE_RULES  (prompts.py:91)   11 rules
@@ -345,7 +345,7 @@ never sees.
 
 ## 7. Validation — the safety boundary
 
-`app/dream/validation.py:47`
+`memdream/engine/dream/validation.py:47`
 
 A `DreamDecision` is an untrusted suggestion. Before anything reaches the
 database:
@@ -374,7 +374,7 @@ overruled model is visible rather than silent.
 
 ## 8. Lifecycle transitions
 
-`app/memory/lifecycle.py` — the **only** code allowed to change a memory's status.
+`memdream/engine/memory/lifecycle.py` — the **only** code allowed to change a memory's status.
 
 ```
 NEW ──► ACTIVE ──┬──► SUPERSEDED
@@ -423,7 +423,7 @@ reworded. The next synthesis run decides.
 
 ## 9. Synthesis
 
-`app/dream/synthesis.py`. Background only.
+`memdream/engine/dream/synthesis.py`. Background only.
 
 ```
 POST /v1/dream/synthesize
@@ -557,7 +557,7 @@ All manual operations write audit rows with `provider: "manual"` and
 
 ## 12. Provider abstraction
 
-`app/memory` and `app/dream` import provider **base classes only** — never a
+`memdream/engine/memory` and `memdream/engine/dream` import provider **base classes only** — never a
 concrete implementation. That invariant is what keeps Azure OpenAI a first
 implementation rather than a dependency.
 
@@ -568,7 +568,7 @@ implementation rather than a dependency.
 | `VectorStore` | `upsert`, `search`, `delete`, `update`, `count`, `clear` | FAISS, in-memory |
 | `JobQueue` | `enqueue_synthesis`, `health_check`, `close` | in-process pool, jobs table |
 
-Everything is constructed in one place — `app/container.py`, the composition
+Everything is constructed in one place — `memdream/engine/container.py`, the composition
 root. The API and the worker build the *same* container, so there's no second
 wiring path to drift.
 
@@ -594,11 +594,11 @@ let every test pass while exercising nothing.
 
 | To change… | Edit |
 |---|---|
-| How supersede/merge decide | `app/dream/prompts.py:91` / `:116` — highest leverage in the codebase |
+| How supersede/merge decide | `memdream/engine/dream/prompts.py:91` / `:116` — highest leverage in the codebase |
 | What gets extracted | `EXTRACTION_SYSTEM`, `prompts.py:28` |
 | Thresholds | `config/dream.yaml` — measure first with `python -m scripts.calibrate` |
 | Ranking weights | `retrieval.weights` + `status_multipliers` |
-| What may be stored | `app/core/policy.py` |
+| What may be stored | `memdream/engine/core/policy.py` |
 | Backend protections | `engine.py:490` (`_protect_from_supersede`) |
 | Add an LLM/vector/queue provider | Implement the base class, add one line to the factory |
 | Rebuild the index | `python -m scripts.rebuild_index [--re-embed]` |

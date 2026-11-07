@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.memory.triage import skip_reason
+from memdream.engine.memory.triage import skip_reason
 
 # --------------------------------------------------------------------------- #
 # Skipped — structurally incapable of stating a fact about the user

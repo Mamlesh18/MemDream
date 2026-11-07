@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import Settings
-from app.core.prompts import PromptLibrary
+from memdream.engine.core.config import Settings
+from memdream.engine.core.prompts import PromptLibrary
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "prompts"
 
@@ -113,8 +113,8 @@ def test_each_prompt_stays_within_budget(name):
 
 @pytest.mark.parametrize("name", sorted(SHAPE_BUDGET))
 def test_each_output_shape_stays_within_budget(name):
-    from app.models import dream
-    from app.providers.llm.base import schema_hint
+    from memdream.engine.models import dream
+    from memdream.engine.providers.llm.base import schema_hint
 
     model = getattr(dream, name)
     size = approx_tokens(schema_hint(model))
@@ -127,7 +127,7 @@ def test_each_output_shape_stays_within_budget(name):
 def test_the_hand_written_shape_is_actually_being_used(name):
     """If `prompt_shape` is dropped from a model, `schema_hint` silently falls
     back to generation and the call quietly doubles in size."""
-    from app.models import dream
+    from memdream.engine.models import dream
 
     assert getattr(dream, name).prompt_shape.strip(), f"{name} has no prompt_shape"
 
@@ -141,8 +141,8 @@ def test_the_fixed_cost_of_a_write_stays_under_800():
     one of them is in `test_*_keeps_its_hard_won_rules` because it was added to
     fix something that actually happened — three of them were re-added after a
     live run against the real model showed the shorter prompt breaking."""
-    from app.models.dream import DreamDecision, ExtractionResult
-    from app.providers.llm.base import schema_hint
+    from memdream.engine.models.dream import DreamDecision, ExtractionResult
+    from memdream.engine.providers.llm.base import schema_hint
 
     fixed = (
         approx_tokens(prompts.extraction_system())
@@ -156,8 +156,8 @@ def test_the_fixed_cost_of_a_write_stays_under_800():
 def test_a_candidate_memory_costs_under_60_tokens():
     """The dominant cost of a decision: ten candidates at the old 88 tokens was
     880 tokens of payload against a 380-token prompt."""
-    from app.dream.prompts import _dumps, _memory_view
-    from app.models.memory import Memory
+    from memdream.engine.dream.prompts import _dumps, _memory_view
+    from memdream.engine.models.memory import Memory
 
     memory = Memory(
         user_id="u",
@@ -221,7 +221,7 @@ def test_sensitive_does_not_swallow_dietary_needs():
     """The trap this nearly shipped with: an allergy read as a health condition,
     flagged sensitive, and rejected outright by the default policy — a
     restaurant bot silently forgetting a peanut allergy."""
-    from app.models.dream import ExtractionResult
+    from memdream.engine.models.dream import ExtractionResult
 
     prompt = prompts.extraction_system()
     shape = ExtractionResult.prompt_shape
@@ -260,7 +260,7 @@ def test_no_domain_leaves_no_trace():
 
 def test_the_default_is_general_purpose():
     """MemDream is not a restaurant framework. The domain is opt-in."""
-    from app.core.config import Settings
+    from memdream.engine.core.config import Settings
 
     assert Settings(env="test", identity_salt="t", domain="").domain == ""
     assert prompts.DEFAULT_DOMAIN == ""

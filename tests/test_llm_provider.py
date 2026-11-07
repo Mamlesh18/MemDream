@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.exceptions import LLMResponseError
-from app.models.dream import DreamDecision, ExtractionResult
-from app.providers.llm.base import extract_json_object, schema_hint, validate_response
+from memdream.engine.core.exceptions import LLMResponseError
+from memdream.engine.models.dream import DreamDecision, ExtractionResult
+from memdream.engine.providers.llm.base import extract_json_object, schema_hint, validate_response
 
 pytestmark = pytest.mark.asyncio
 
@@ -122,8 +122,8 @@ class _StubProvider:
 
     @staticmethod
     def build(responses: list[str]):
-        from app.core.config import LLMSettings
-        from app.providers.llm._openai_style import OpenAIStyleLLMProvider
+        from memdream.engine.core.config import LLMSettings
+        from memdream.engine.providers.llm._openai_style import OpenAIStyleLLMProvider
 
         provider = OpenAIStyleLLMProvider.__new__(OpenAIStyleLLMProvider)
         provider._settings = LLMSettings()

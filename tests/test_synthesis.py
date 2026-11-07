@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.dream.clustering import cluster_memories
-from app.models.enums import JobStatus, MemoryStatus, MemoryType
+from memdream.engine.dream.clustering import cluster_memories
+from memdream.engine.models.enums import JobStatus, MemoryStatus, MemoryType
 
 pytestmark = pytest.mark.asyncio
 

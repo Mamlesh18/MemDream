@@ -30,9 +30,6 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from app.core.identity import build_scope
-from app.main import create_app
-from app.models.memory import Memory, utcnow
 from memdream import (
     AsyncDreamClient,
     AsyncMemDream,
@@ -48,6 +45,9 @@ from memdream.client import (
     _DreamAPI,
     _MemoryAPI,
 )
+from memdream.engine.core.identity import build_scope
+from memdream.engine.main import create_app
+from memdream.engine.models.memory import Memory, utcnow
 from memdream.exceptions import DreamAPIError, DreamNotFoundError, DreamValidationError
 
 pytestmark = pytest.mark.asyncio

@@ -189,7 +189,7 @@ async def test_a_call_can_override_the_default_user(container):
 async def test_a_phone_number_derives_the_same_id_as_the_http_path(container):
     """Built through `build_scope`, so the salt and digest are shared. An
     embedded write must land in the partition the server would read."""
-    from app.core.identity import build_scope
+    from memdream.engine.core.identity import build_scope
 
     facade = AsyncMemDream(phone_number="+919999999999", container=container)
     await facade.add("I live in Chennai.")

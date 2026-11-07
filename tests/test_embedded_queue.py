@@ -23,9 +23,9 @@ import asyncio
 
 import pytest
 
-from app.models.dream import DreamJob
-from app.models.enums import JobStatus
-from app.providers.queue.inline_queue import EmbeddedJobQueue, InlineJobQueue
+from memdream.engine.models.dream import DreamJob
+from memdream.engine.models.enums import JobStatus
+from memdream.engine.providers.queue.inline_queue import EmbeddedJobQueue, InlineJobQueue
 
 
 def _job(job_id: str) -> DreamJob:
@@ -303,7 +303,7 @@ async def test_the_previous_name_still_works():
 
 
 async def test_the_factory_sizes_the_pool_from_settings(settings):
-    from app.providers.queue.factory import build_job_queue
+    from memdream.engine.providers.queue.factory import build_job_queue
 
     settings.dream.synthesis.max_concurrent = 5
     settings.dream.synthesis.max_queued = 7
@@ -315,8 +315,8 @@ async def test_the_factory_sizes_the_pool_from_settings(settings):
 
 
 async def test_it_is_the_default_so_one_process_is_enough():
-    """The reason this module exists: `uvicorn app.main:app` and nothing else."""
-    from app.core.config import Settings
+    """The reason this module exists: `uvicorn memdream.engine.main:app` and nothing else."""
+    from memdream.engine.core.config import Settings
 
     assert Settings(env="test", identity_salt="t").queue_provider == "inline"
 

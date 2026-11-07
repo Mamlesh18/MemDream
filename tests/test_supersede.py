@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.enums import DreamAction, MemoryStatus, MemoryType, TemporalNature
+from memdream.engine.models.enums import DreamAction, MemoryStatus, MemoryType, TemporalNature
 
 pytestmark = pytest.mark.asyncio
 
@@ -194,7 +194,7 @@ async def test_supersede_guard_refuses_patterns_and_permanent_facts(make_memory)
     unreachable in normal operation — which is exactly why it is worth testing
     directly rather than through the pipeline.
     """
-    from app.dream.engine import DreamEngine
+    from memdream.engine.dream.engine import DreamEngine
 
     pattern = make_memory("A pattern.", memory_type=MemoryType.PATTERN.value)
     permanent = make_memory(
@@ -214,9 +214,9 @@ async def test_supersede_guard_refuses_patterns_and_permanent_facts(make_memory)
 async def test_supersede_disabled_falls_back_to_add(
     settings, database, llm, embeddings, store_memory, candidate, scope
 ):
-    from app.container import DreamContainer
-    from app.providers.queue.inline_queue import InlineJobQueue
-    from app.providers.vector_store.memory_store import InMemoryVectorStore
+    from memdream.engine.container import DreamContainer
+    from memdream.engine.providers.queue.inline_queue import InlineJobQueue
+    from memdream.engine.providers.vector_store.memory_store import InMemoryVectorStore
 
     settings.dream.supersede.enabled = False
     container = await DreamContainer.create(
@@ -230,7 +230,7 @@ async def test_supersede_disabled_falls_back_to_add(
     )
 
     memory = await container.memories.insert(
-        __import__("app.models.memory", fromlist=["Memory"]).Memory(
+        __import__("memdream.engine.models.memory", fromlist=["Memory"]).Memory(
             client_id=scope.client_id,
             bot_id=scope.bot_id,
             user_id=scope.user_id,
@@ -346,7 +346,7 @@ async def test_mutable_types_ignore_a_wrong_permanent_label(make_memory):
     biryani" could never supersede it. One mislabel at extraction time froze the
     memory beyond correction, turning a safety check into a trap.
     """
-    from app.dream.engine import DreamEngine
+    from memdream.engine.dream.engine import DreamEngine
 
     preference = make_memory(
         "User likes biryani.",
@@ -364,7 +364,7 @@ async def test_mutable_types_ignore_a_wrong_permanent_label(make_memory):
     "memory_type", ["preference", "behavior", "goal", "project", "constraint", "skill"]
 )
 async def test_all_inherently_mutable_types_stay_supersedable(make_memory, memory_type):
-    from app.dream.engine import DreamEngine
+    from memdream.engine.dream.engine import DreamEngine
 
     memory = make_memory(
         "Something changeable.",
@@ -378,7 +378,7 @@ async def test_all_inherently_mutable_types_stay_supersedable(make_memory, memor
 @pytest.mark.parametrize("memory_type", ["profile", "fact", "event"])
 async def test_genuinely_permanent_facts_are_still_protected(make_memory, memory_type):
     """Birthplace does not stop being true because someone moved."""
-    from app.dream.engine import DreamEngine
+    from memdream.engine.dream.engine import DreamEngine
 
     memory = make_memory(
         "User was born in Chennai.",

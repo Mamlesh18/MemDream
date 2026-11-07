@@ -9,7 +9,7 @@ Scoped queries used to filter on a three-field predicate — `clientId`, `botId`
 `userId`. They now filter on `scopeKey`, a single digest of the whole scope,
 because with optional dimensions a predicate has to reason about
 null-versus-missing for each one and getting that wrong matches the wrong
-partition. See `app/models/scope.py`.
+partition. See `memdream/engine/models/scope.py`.
 
 Documents written before that change have no `scopeKey`. **They are not lost,
 but they are invisible**: every query filters on a field they do not have, so a
@@ -45,10 +45,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 
-from app.core.config import get_settings  # noqa: E402
-from app.core.logging import configure_logging, get_logger  # noqa: E402
-from app.models.scope import MemoryScope  # noqa: E402
-from app.repositories.mongo import (  # noqa: E402
+from memdream.engine.core.config import get_settings  # noqa: E402
+from memdream.engine.core.logging import configure_logging, get_logger  # noqa: E402
+from memdream.engine.models.scope import MemoryScope  # noqa: E402
+from memdream.engine.repositories.mongo import (  # noqa: E402
     JOBS,
     MEMORIES,
     OPERATIONS,

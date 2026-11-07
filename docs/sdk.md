@@ -350,7 +350,7 @@ MemDream(
 | `database` | `"mongodb://..."`, `"postgresql://..."`, `"memory"` (in-process, no server, kept only while the process runs; the vector index then defaults to `"memory"` too), or an already-connected database to use instead of opening one |
 | `auto_dream` | `True` (default): synthesis triggers itself as memories accumulate, and a daily pass retires memories whose validity has ended — for as long as the process runs. `False`: nothing runs unless you call [`synthesize`](#synthesize) or [`consolidate`](#consolidate) |
 | `log_level` | MemDream logs only warnings by default, to stderr, and leaves your app's own logging alone. `log_level="INFO"` shows every decision |
-| `settings` | a complete `app.core.config.Settings`. Default: read from the environment |
+| `settings` | a complete `memdream.engine.core.config.Settings`. Default: read from the environment |
 | `**overrides` | any other setting, e.g. `triage_enabled=False` |
 | `container` | an already-built engine to adopt, e.g. the one your MemDream server app built. The SDK will not close what it did not open |
 

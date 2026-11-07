@@ -20,11 +20,11 @@ import argparse
 import asyncio
 import sys
 
-from app.container import DreamContainer
-from app.core.config import get_settings
-from app.core.logging import configure_logging, get_logger
-from app.models.enums import MemoryStatus
-from app.models.scope import MemoryScope
+from memdream.engine.container import DreamContainer
+from memdream.engine.core.config import get_settings
+from memdream.engine.core.logging import configure_logging, get_logger
+from memdream.engine.models.enums import MemoryStatus
+from memdream.engine.models.scope import MemoryScope
 
 logger = get_logger(__name__)
 

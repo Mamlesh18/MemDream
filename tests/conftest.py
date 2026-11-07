@@ -18,17 +18,17 @@ os.environ.setdefault("DREAM_IDENTITY_SALT", "test-salt-do-not-use-in-production
 os.environ.setdefault("DREAM_LOG_LEVEL", "WARNING")
 os.environ.setdefault("DREAM_CONFIG_FILE", "")
 
-from app.container import DreamContainer  # noqa: E402
-from app.core.config import Settings  # noqa: E402
-from app.core.identity import build_scope  # noqa: E402
-from app.core.metrics import metrics  # noqa: E402
-from app.models.dream import ExtractedMemory  # noqa: E402
-from app.models.memory import Memory  # noqa: E402
-from app.providers.embeddings.fake import FakeEmbeddingProvider  # noqa: E402
-from app.providers.llm.fake import FakeLLMProvider  # noqa: E402
-from app.providers.queue.inline_queue import InlineJobQueue  # noqa: E402
-from app.providers.vector_store.memory_store import InMemoryVectorStore  # noqa: E402
-from app.repositories.mongo import MongoDatabase  # noqa: E402
+from memdream.engine.container import DreamContainer  # noqa: E402
+from memdream.engine.core.config import Settings  # noqa: E402
+from memdream.engine.core.identity import build_scope  # noqa: E402
+from memdream.engine.core.metrics import metrics  # noqa: E402
+from memdream.engine.models.dream import ExtractedMemory  # noqa: E402
+from memdream.engine.models.memory import Memory  # noqa: E402
+from memdream.engine.providers.embeddings.fake import FakeEmbeddingProvider  # noqa: E402
+from memdream.engine.providers.llm.fake import FakeLLMProvider  # noqa: E402
+from memdream.engine.providers.queue.inline_queue import InlineJobQueue  # noqa: E402
+from memdream.engine.providers.vector_store.memory_store import InMemoryVectorStore  # noqa: E402
+from memdream.engine.repositories.mongo import MongoDatabase  # noqa: E402
 
 
 @pytest.fixture
@@ -178,7 +178,7 @@ def store_memory(container, make_memory, embeddings):
     """Persist a memory and index it, bypassing the Dream engine."""
 
     async def _store(content: str, *, target_scope=None, **kwargs) -> Memory:
-        from app.models.scope import MemoryScope
+        from memdream.engine.models.scope import MemoryScope
 
         used: MemoryScope = target_scope or kwargs.pop("scope", None)
         memory = make_memory(content, target_scope=used, **kwargs)
@@ -186,7 +186,7 @@ def store_memory(container, make_memory, embeddings):
         memory.embedding_model = embeddings.model_name
         memory.embedding_dim = embeddings.dimensions
 
-        from app.models.scope import MemoryScope as _S
+        from memdream.engine.models.scope import MemoryScope as _S
 
         active_scope = used or _S(
             client_id=memory.client_id, bot_id=memory.bot_id, user_id=memory.user_id

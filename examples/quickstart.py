@@ -26,15 +26,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mongomock_motor import AsyncMongoMockClient
 
-from app.container import DreamContainer
-from app.core.config import Settings
-from app.core.identity import build_scope
-from app.core.logging import configure_logging
-from app.models.enums import MemoryStatus
-from app.models.requests import SearchMemoryRequest
-from app.providers.queue.inline_queue import InlineJobQueue
-from app.providers.vector_store.memory_store import InMemoryVectorStore
-from app.repositories.mongo import MongoDatabase
+from memdream.engine.container import DreamContainer
+from memdream.engine.core.config import Settings
+from memdream.engine.core.identity import build_scope
+from memdream.engine.core.logging import configure_logging
+from memdream.engine.models.enums import MemoryStatus
+from memdream.engine.models.requests import SearchMemoryRequest
+from memdream.engine.providers.queue.inline_queue import InlineJobQueue
+from memdream.engine.providers.vector_store.memory_store import InMemoryVectorStore
+from memdream.engine.repositories.mongo import MongoDatabase
 
 BOT = "bot_demo"
 PHONE = "+919999999999"

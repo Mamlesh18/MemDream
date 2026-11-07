@@ -7,12 +7,12 @@ each load-bearing decision went the way it did.
 
 MemDream is a library first. `MemDream` / `AsyncMemDream` (`memdream/embedded.py`)
 build the whole engine inside the caller's process — no server, no worker. The
-optional HTTP service (`app/main.py`, called through `DreamClient`) builds the
+optional HTTP service (`memdream/engine/main.py`, called through `DreamClient`) builds the
 **same** engine for deployments where several apps share one memory.
 
 Both go through one composition root, `DreamContainer.create` in
-`app/container.py`, so there is no second wiring path that could drift. Both
-also start the same daily consolidation clock (`app/dream/scheduler.py`): the
+`memdream/engine/container.py`, so there is no second wiring path that could drift. Both
+also start the same daily consolidation clock (`memdream/engine/dream/scheduler.py`): the
 API in its lifespan, the library on first use unless `auto_dream=False`.
 Everything below applies to either.
 
@@ -55,7 +55,7 @@ Everything below follows from those four.
         └──────────────────────────────┘
 ```
 
-The canonical store (`app/repositories/`, Mongo or Postgres behind one
+The canonical store (`memdream/engine/repositories/`, Mongo or Postgres behind one
 interface) holds the full record, including the embedding. The vector index
 holds a copy of the vector and nothing else. `database="memory"` in the library
 swaps in an in-process stand-in for Mongo, with the vector index in memory too,
@@ -85,7 +85,7 @@ Memory documents are irregular by nature: an open `metadata` bag, a variable
 `sourceMemoryIds` list, an optional embedding array of a model-dependent width.
 A document store fits that without migrations every time a memory type acquires
 a field. Postgres is supported for teams that already run it; its columns are
-named after the model fields (`app/repositories/postgres/_sql.py`), so the
+named after the model fields (`memdream/engine/repositories/postgres/_sql.py`), so the
 mapping layer is the model itself.
 
 On Mongo the cost is no multi-document transaction by default, and supersede
@@ -104,7 +104,7 @@ by the scope's `scopeKey` — a SHA-256 digest over every dimension the scope ha
 Cross-tenant retrieval is not something the code avoids; it is something the
 code cannot express, because the vectors are in a different file. Server-based
 vector stores have no files to separate, so each expresses the same guarantee as
-a namespace or a filter (`app/providers/vector_store/_scope_keys.py`), and the
+a namespace or a filter (`memdream/engine/providers/vector_store/_scope_keys.py`), and the
 conformance suite checks every one.
 
 Partitioning has a second benefit. Each index holds one user's memories —
@@ -176,7 +176,7 @@ re-partitions.
 prompt
   │
   ├─ triage ────────────────────── greetings and pure questions stop here,
-  │                                no LLM call (app/memory/triage.py)
+  │                                no LLM call (memdream/engine/memory/triage.py)
   │
   ├─ extraction (LLM) ──────────── one message may hold several facts
   │
@@ -280,7 +280,7 @@ bands move substantially.
 
 ## 6. Validating what the model returned
 
-A `DreamDecision` is an untrusted suggestion. `app/dream/validation.py` reduces
+A `DreamDecision` is an untrusted suggestion. `memdream/engine/dream/validation.py` reduces
 it to something safe before anything reaches the database:
 
 - **Target ids are intersected with the ids the model was shown.** A
@@ -492,7 +492,7 @@ memdream/
   models.py            return types shared by both
   __main__.py          `python -m memdream prompts ./prompts`
 
-app/
+memdream/engine/
   container.py         composition root — the only place providers are constructed
   main.py              optional FastAPI service, middleware, error translation
 
@@ -510,6 +510,6 @@ app/
   workers/             optional worker for DREAM_QUEUE_PROVIDER=database
 ```
 
-`app/memory` and `app/dream` import provider **base classes** only. That is the
+`memdream/engine/memory` and `memdream/engine/dream` import provider **base classes** only. That is the
 invariant that keeps every provider an implementation rather than a
 dependency, and it is worth preserving.

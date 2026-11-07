@@ -22,9 +22,9 @@ from datetime import timedelta
 
 import pytest
 
-from app.dream.consolidation import ConsolidationEngine
-from app.models.enums import MemoryStatus, MemoryType
-from app.models.memory import Memory, utcnow
+from memdream.engine.dream.consolidation import ConsolidationEngine
+from memdream.engine.models.enums import MemoryStatus, MemoryType
+from memdream.engine.models.memory import Memory, utcnow
 
 pytestmark = pytest.mark.asyncio
 
@@ -54,7 +54,7 @@ async def _store(container, scope, content, **overrides):
 async def test_a_search_records_what_it_returned(container, scope):
     await _store(container, scope, "User is allergic to peanuts.")
 
-    from app.models.requests import SearchMemoryRequest
+    from memdream.engine.models.requests import SearchMemoryRequest
 
     results = await container.memory_service.search(
         scope, SearchMemoryRequest(user_id=scope.user_id, query="peanuts allergy")
@@ -91,7 +91,7 @@ async def test_recall_does_not_count_as_an_update(container, scope):
 
 async def test_recall_is_scoped(container, scope):
     """Another tenant's search must not touch this tenant's counters."""
-    from app.models.scope import MemoryScope
+    from memdream.engine.models.scope import MemoryScope
 
     memory = await _store(container, scope, "User is allergic to peanuts.")
     other = MemoryScope(user_id="somebody-else")
@@ -110,7 +110,7 @@ async def test_a_broken_counter_never_fails_a_search(container, scope, monkeypat
     monkeypatch.setattr(container.memories, "record_recall", boom)
 
     await _store(container, scope, "User is allergic to peanuts.")
-    from app.models.requests import SearchMemoryRequest
+    from memdream.engine.models.requests import SearchMemoryRequest
 
     results = await container.memory_service.search(
         scope, SearchMemoryRequest(user_id=scope.user_id, query="peanuts allergy")
@@ -122,7 +122,7 @@ async def test_tracking_can_be_switched_off(container, scope):
     container.settings.track_recall = False
     memory = await _store(container, scope, "User is allergic to peanuts.")
 
-    from app.models.requests import SearchMemoryRequest
+    from memdream.engine.models.requests import SearchMemoryRequest
 
     await container.memory_service.search(
         scope, SearchMemoryRequest(user_id=scope.user_id, query="peanuts allergy")
@@ -250,7 +250,7 @@ async def test_a_dry_run_changes_nothing(consolidator, container, scope):
 
 
 async def test_consolidation_is_scoped(consolidator, container, scope):
-    from app.models.scope import MemoryScope
+    from memdream.engine.models.scope import MemoryScope
 
     lapsed = await _store(
         container, scope, "User is on leave this week.",
@@ -283,7 +283,7 @@ async def test_it_needs_no_model_and_no_embedding(consolidator, container, scope
 async def test_expired_memories_leave_the_search_index(consolidator, container, scope):
     """Going through the lifecycle rather than the repository is what unindexes
     them — the same path "forget that" takes."""
-    from app.models.requests import SearchMemoryRequest
+    from memdream.engine.models.requests import SearchMemoryRequest
 
     await _store(
         container, scope, "User is on leave this week.",

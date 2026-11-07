@@ -6,17 +6,22 @@ import tempfile
 
 import pytest
 
-from app.core.config import MemoryPolicySettings, RetrievalSettings
-from app.core.exceptions import TenantIsolationError, ValidationError
-from app.core.identity import build_scope, derive_user_id, hash_phone_number, normalize_phone_number
-from app.core.policy import MemoryPolicy
-from app.memory.ranker import HybridRanker
-from app.models.dream import ExtractedMemory
-from app.models.enums import MemoryStatus
-from app.models.memory import Memory, utcnow
-from app.models.scope import MemoryScope
-from app.providers.vector_store.base import VectorRecord
-from app.providers.vector_store.faiss_store import FaissVectorStore
+from memdream.engine.core.config import MemoryPolicySettings, RetrievalSettings
+from memdream.engine.core.exceptions import TenantIsolationError, ValidationError
+from memdream.engine.core.identity import (
+    build_scope,
+    derive_user_id,
+    hash_phone_number,
+    normalize_phone_number,
+)
+from memdream.engine.core.policy import MemoryPolicy
+from memdream.engine.memory.ranker import HybridRanker
+from memdream.engine.models.dream import ExtractedMemory
+from memdream.engine.models.enums import MemoryStatus
+from memdream.engine.models.memory import Memory, utcnow
+from memdream.engine.models.scope import MemoryScope
+from memdream.engine.providers.vector_store.base import VectorRecord
+from memdream.engine.providers.vector_store.faiss_store import FaissVectorStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,7 +75,7 @@ async def test_raw_phone_number_never_appears_in_the_identifiers(settings):
 
 
 async def test_a_different_salt_produces_different_identities(settings):
-    from app.core.config import Settings
+    from memdream.engine.core.config import Settings
 
     other = Settings(identity_salt="a-completely-different-salt", env="test")
     assert hash_phone_number("+919999999999", settings) != hash_phone_number("+919999999999", other)

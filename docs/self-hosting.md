@@ -79,7 +79,7 @@ pip install .                      # or: pip install ".[gemini,anthropic]"
 
 cp .env.example .env               # set DREAM_MONGODB_URI and provider credentials
 python -m memdream prompts ./prompts   # MemDream ships no prompts; edit these
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn memdream.engine.main:app --host 0.0.0.0 --port 8000
 ```
 
 Optional extras: `gemini`, `anthropic`, `postgres`, `qdrant`, `pgvector`,
@@ -263,9 +263,9 @@ memory's embedding and can always be rebuilt from it.
 | `qdrant` | `qdrant` | `DREAM_QDRANT_URL`, `DREAM_QDRANT_API_KEY`, `DREAM_QDRANT_COLLECTION` |
 | `pgvector` | `pgvector` | `DREAM_POSTGRES_DSN`, `DREAM_PGVECTOR_TABLE` |
 | `chroma` | `chroma` | `DREAM_CHROMA_PATH`, or `DREAM_CHROMA_HOST` and `DREAM_CHROMA_PORT`; `DREAM_CHROMA_COLLECTION` |
-| `pinecone` | `pinecone` | `DREAM_PINECONE_API_KEY` and index settings — see `app/core/config.py` |
-| `milvus` | `milvus` | see `app/core/config.py` |
-| `azure_search` | `azure-search` | `DREAM_AZURE_SEARCH_API_KEY` and endpoint settings — see `app/core/config.py` |
+| `pinecone` | `pinecone` | `DREAM_PINECONE_API_KEY` and index settings — see `memdream/engine/core/config.py` |
+| `milvus` | `milvus` | see `memdream/engine/core/config.py` |
+| `azure_search` | `azure-search` | `DREAM_AZURE_SEARCH_API_KEY` and endpoint settings — see `memdream/engine/core/config.py` |
 | `memory` | — | in-process and not persisted. Tests and demos only |
 
 FAISS is a library, not a server: its index is files on local disk, so it suits a
@@ -315,7 +315,7 @@ Set `"active": false` to revoke. Changes take effect within 60 seconds.
 With `DREAM_QUEUE_PROVIDER=database`, run the worker alongside the API:
 
 ```bash
-python -m app.workers.synthesis_worker
+python -m memdream.engine.workers.synthesis_worker
 ```
 
 ### Consolidation
@@ -393,7 +393,7 @@ rebuilt from it.
 - [ ] `DREAM_IDENTITY_SALT` set to a long random value, stored as a secret, never changed
 - [ ] API keys bound to clients, and `DREAM_API_KEY_REQUIRE_BINDING=true` on multi-tenant deployments
 - [ ] The service reachable only through your gateway or private network, over TLS
-- [ ] CORS: MemDream allows every origin by default. Restrict `allow_origins` in `app/main.py` if browsers can reach it directly
+- [ ] CORS: MemDream allows every origin by default. Restrict `allow_origins` in `memdream/engine/main.py` if browsers can reach it directly
 - [ ] `.env` and credentials kept out of version control
 - [ ] Orchestrator probes: `/health` for liveness, `/ready` for readiness
 - [ ] Database backups. The vector index does not need them

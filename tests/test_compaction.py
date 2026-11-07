@@ -21,9 +21,9 @@ from datetime import timedelta
 
 import pytest
 
-from app.dream.compaction import CompactionEngine
-from app.models.enums import MemoryStatus, MemoryType, TemporalNature
-from app.models.memory import Memory, utcnow
+from memdream.engine.dream.compaction import CompactionEngine
+from memdream.engine.models.enums import MemoryStatus, MemoryType, TemporalNature
+from memdream.engine.models.memory import Memory, utcnow
 
 pytestmark = pytest.mark.asyncio
 
@@ -119,7 +119,7 @@ async def test_a_summary_is_inferred_not_testimony(compactor, container, scope):
 
 async def test_folded_memories_leave_the_search_index(compactor, container, scope):
     """Otherwise the same fact comes back twice under two ids."""
-    from app.models.requests import SearchMemoryRequest
+    from memdream.engine.models.requests import SearchMemoryRequest
 
     await _crowd(container, scope)
     await compactor.run(scope)
@@ -261,8 +261,8 @@ async def test_a_suspiciously_short_summary_is_refused(compactor, container, sco
     """A summary shorter than the longest thing it replaces has almost certainly
     dropped something. Cheap check, and it catches the failure this feature is
     most likely to have."""
-    from app.models.dream import CompactionResult
-    from app.providers.llm.base import LLMResult
+    from memdream.engine.models.dream import CompactionResult
+    from memdream.engine.providers.llm.base import LLMResult
 
     async def terse(**kwargs):
         return LLMResult(
@@ -286,8 +286,8 @@ async def test_a_suspiciously_short_summary_is_refused(compactor, container, sco
 async def test_a_model_refusal_folds_nothing(compactor, container, scope, monkeypatch):
     """`keep: false` means these do not belong together, and storing them apart
     is the right answer."""
-    from app.models.dream import CompactionResult
-    from app.providers.llm.base import LLMResult
+    from memdream.engine.models.dream import CompactionResult
+    from memdream.engine.providers.llm.base import LLMResult
 
     async def refuse(**kwargs):
         return LLMResult(
@@ -305,7 +305,7 @@ async def test_a_model_refusal_folds_nothing(compactor, container, scope, monkey
 
 
 async def test_a_provider_failure_folds_nothing(compactor, container, scope, monkeypatch):
-    from app.core.exceptions import ProviderError
+    from memdream.engine.core.exceptions import ProviderError
 
     async def boom(**kwargs):
         raise ProviderError("the model is down")

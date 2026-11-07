@@ -16,7 +16,7 @@ import textwrap
 
 import pytest
 
-from app.core.config import Settings
+from memdream.engine.core.config import Settings
 
 pytestmark = pytest.mark.asyncio
 

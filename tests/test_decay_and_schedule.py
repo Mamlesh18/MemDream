@@ -18,10 +18,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.dream.consolidation import ConsolidationEngine
-from app.dream.scheduler import ConsolidationScheduler
-from app.models.enums import MemoryStatus, MemoryType, TemporalNature
-from app.models.memory import Memory, utcnow
+from memdream.engine.dream.consolidation import ConsolidationEngine
+from memdream.engine.dream.scheduler import ConsolidationScheduler
+from memdream.engine.models.enums import MemoryStatus, MemoryType, TemporalNature
+from memdream.engine.models.memory import Memory, utcnow
 
 pytestmark = pytest.mark.asyncio
 
@@ -242,7 +242,7 @@ async def test_it_picks_the_next_occurrence_of_the_configured_hour(container):
 async def test_a_sweep_covers_every_partition(container, scope):
     """The reason this exists: consolidation was only reachable through a
     synthesis run, so an account that stopped talking never got one."""
-    from app.models.scope import MemoryScope
+    from memdream.engine.models.scope import MemoryScope
 
     await _store(
         container, scope, "User is on leave this week.",
@@ -275,7 +275,7 @@ async def test_one_bad_partition_does_not_stop_the_sweep(container, scope, monke
 
     monkeypatch.setattr(container.consolidation, "run", flaky)
 
-    from app.models.scope import MemoryScope
+    from memdream.engine.models.scope import MemoryScope
 
     await _store(container, scope, "User likes tea.")
     await _store(container, MemoryScope(user_id="someone-else"), "User likes coffee.")

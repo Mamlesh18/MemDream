@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.identity import build_scope, derive_user_id
-from app.models.memory import Memory
-from app.models.scope import MemoryScope
+from memdream.engine.core.identity import build_scope, derive_user_id
+from memdream.engine.models.memory import Memory
+from memdream.engine.models.scope import MemoryScope
 
 pytestmark = pytest.mark.asyncio
 

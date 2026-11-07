@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.enums import DreamAction, MemoryStatus, MemoryType
-from app.models.requests import SearchMemoryRequest
+from memdream.engine.models.enums import DreamAction, MemoryStatus, MemoryType
+from memdream.engine.models.requests import SearchMemoryRequest
 
 pytestmark = pytest.mark.asyncio
 

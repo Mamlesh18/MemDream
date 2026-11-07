@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.exceptions import InvalidStateTransitionError
-from app.main import create_app
-from app.models.enums import MemoryStatus
+from memdream.engine.core.exceptions import InvalidStateTransitionError
+from memdream.engine.main import create_app
+from memdream.engine.models.enums import MemoryStatus
 
 pytestmark = pytest.mark.asyncio
 

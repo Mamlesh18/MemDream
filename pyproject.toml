@@ -85,7 +85,7 @@ Issues = "https://github.com/Mamlesh18/MemDream/issues"
 memdream-eval = "eval.run:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app", "memdream"]
+packages = ["memdream"]
 
 # Starter prompts, so `python -m memdream prompts ./prompts` works from a
 # pip install. They are templates, never loaded unless configuration points

@@ -432,7 +432,7 @@ available as an HTTP API:
 ```bash
 git clone https://github.com/Mamlesh18/MemDream.git && cd MemDream
 cp .env.example .env            # model keys and database
-docker compose up --build       # or: uvicorn app.main:app
+docker compose up --build       # or: uvicorn memdream.engine.main:app
 ```
 
 Your code then swaps one line and keeps every method:

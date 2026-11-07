@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.config import PricingSettings
-from app.core.metrics import (
+from memdream.engine.core.config import PricingSettings
+from memdream.engine.core.metrics import (
     ALL_OPERATIONS,
     LLM_COMPLETION_TOKENS,
     LLM_PROMPT_TOKENS,
@@ -29,8 +29,8 @@ from app.core.metrics import (
     metrics,
     operation,
 )
-from app.main import create_app
-from app.models.requests import SearchMemoryRequest
+from memdream.engine.main import create_app
+from memdream.engine.models.requests import SearchMemoryRequest
 
 pytestmark = pytest.mark.asyncio
 

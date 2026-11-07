@@ -39,7 +39,7 @@ def copy_prompts(target: Path, *, force: bool = False) -> int:
     source = template_dir()
     target.mkdir(parents=True, exist_ok=True)
 
-    from app.core.prompts import PROMPT_NAMES
+    from memdream.engine.core.prompts import PROMPT_NAMES
 
     # Named rather than globbed, so what lands in the directory is exactly the
     # set MemDream can ask for. The README beside them comes too, as its
@@ -76,7 +76,7 @@ def copy_prompts(target: Path, *, force: bool = False) -> int:
 
 
 def list_prompts() -> int:
-    from app.core.prompts import PROMPT_PURPOSE
+    from memdream.engine.core.prompts import PROMPT_PURPOSE
 
     print("MemDream asks for these prompts. Which are required depends on your")
     print("configuration: staged decisions need supersede + merge instead of")

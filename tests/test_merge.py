@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.enums import DreamAction, MemoryStatus
-from app.models.memory import content_fingerprint, normalize_content
+from memdream.engine.models.enums import DreamAction, MemoryStatus
+from memdream.engine.models.memory import content_fingerprint, normalize_content
 
 pytestmark = pytest.mark.asyncio
 

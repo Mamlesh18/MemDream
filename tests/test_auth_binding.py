@@ -13,10 +13,10 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.auth import ApiKeyRegistry, Principal, hash_key
-from app.core.config import Settings
-from app.core.exceptions import UnauthorizedError
-from app.main import create_app
+from memdream.engine.core.auth import ApiKeyRegistry, Principal, hash_key
+from memdream.engine.core.config import Settings
+from memdream.engine.core.exceptions import UnauthorizedError
+from memdream.engine.main import create_app
 
 pytestmark = pytest.mark.asyncio
 

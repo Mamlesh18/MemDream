@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import Settings
-from app.core.exceptions import ConfigurationError
-from app.core.prompts import PROMPT_NAMES, PromptLibrary, required_prompts
-from app.core.shorthand import expand
+from memdream.engine.core.config import Settings
+from memdream.engine.core.exceptions import ConfigurationError
+from memdream.engine.core.prompts import PROMPT_NAMES, PromptLibrary, required_prompts
+from memdream.engine.core.shorthand import expand
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "prompts"
 
@@ -89,9 +89,9 @@ def test_every_missing_prompt_is_named_at_once(container):
 
 async def test_a_container_refuses_to_start_without_prompts(settings, database):
     """Startup, not the first user message."""
-    from app.container import DreamContainer
-    from app.providers.embeddings.fake import FakeEmbeddingProvider
-    from app.providers.llm.fake import FakeLLMProvider
+    from memdream.engine.container import DreamContainer
+    from memdream.engine.providers.embeddings.fake import FakeEmbeddingProvider
+    from memdream.engine.providers.llm.fake import FakeLLMProvider
 
     with pytest.raises(ConfigurationError):
         await DreamContainer.create(

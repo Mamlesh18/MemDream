@@ -11,15 +11,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.config import Settings
-from app.core.exceptions import ProviderError
-from app.providers.embeddings.openai_compatible import (
+from memdream.engine.core.config import Settings
+from memdream.engine.core.exceptions import ProviderError
+from memdream.engine.providers.embeddings.openai_compatible import (
     INFERENCE_ONLY,
 )
-from app.providers.embeddings.openai_compatible import (
+from memdream.engine.providers.embeddings.openai_compatible import (
     from_settings as embeddings_from_settings,
 )
-from app.providers.llm.openai_compatible import PRESETS, resolve
+from memdream.engine.providers.llm.openai_compatible import PRESETS, resolve
 
 pytestmark = pytest.mark.asyncio
 
@@ -141,7 +141,7 @@ async def test_llm_and_embedding_providers_are_independent():
 
 
 async def test_provider_reports_a_label_that_identifies_the_service():
-    from app.providers.llm.openai_compatible import OpenAICompatibleLLMProvider
+    from memdream.engine.providers.llm.openai_compatible import OpenAICompatibleLLMProvider
 
     provider = OpenAICompatibleLLMProvider(
         base_url="https://api.together.xyz/v1",
@@ -155,7 +155,7 @@ async def test_provider_reports_a_label_that_identifies_the_service():
 
 
 async def test_embedding_provider_reports_its_dimensions():
-    from app.providers.embeddings.openai_compatible import (
+    from memdream.engine.providers.embeddings.openai_compatible import (
         OpenAICompatibleEmbeddingProvider,
     )
 
@@ -174,7 +174,7 @@ async def test_embedding_provider_reports_its_dimensions():
 
 async def test_every_llm_preset_has_a_matching_factory_branch():
     """A preset nobody can select is dead configuration."""
-    from app.providers.llm.factory import build_llm_provider  # noqa: F401
+    from memdream.engine.providers.llm.factory import build_llm_provider  # noqa: F401
 
     literal = Settings.model_fields["llm_provider"].annotation
     selectable = set(getattr(literal, "__args__", ()))

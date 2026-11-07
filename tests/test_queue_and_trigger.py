@@ -10,9 +10,9 @@ from datetime import timedelta
 
 import pytest
 
-from app.models.dream import DreamJob
-from app.models.enums import JobStatus
-from app.models.memory import utcnow
+from memdream.engine.models.dream import DreamJob
+from memdream.engine.models.enums import JobStatus
+from memdream.engine.models.memory import utcnow
 
 pytestmark = pytest.mark.asyncio
 
@@ -105,7 +105,7 @@ async def test_claim_returns_none_when_the_queue_is_empty(container):
 
 
 async def test_database_queue_enqueue_is_a_no_op_because_the_row_is_the_queue(container, scope):
-    from app.providers.queue.database_queue import DatabaseJobQueue
+    from memdream.engine.providers.queue.database_queue import DatabaseJobQueue
 
     queue = DatabaseJobQueue(container.jobs)
     job = await _job(container, scope, JobStatus.QUEUED)
@@ -202,7 +202,7 @@ async def test_trigger_failure_never_breaks_the_write(container, scope, monkeypa
 async def test_counting_new_memories_excludes_patterns(container, scope, store_memory):
     """Patterns are synthesis output. Counting them would let synthesis
     re-trigger itself in a loop."""
-    from app.models.enums import MemoryType
+    from memdream.engine.models.enums import MemoryType
 
     await store_memory("A real memory.")
     await store_memory("A synthesised pattern.", memory_type=MemoryType.PATTERN.value)
@@ -222,7 +222,7 @@ async def test_a_job_rebuilds_its_full_scope_not_just_the_triple(container):
     memories — synthesis then analyses nothing, silently, for every deployment
     that partitions by namespace.
     """
-    from app.models.scope import MemoryScope
+    from memdream.engine.models.scope import MemoryScope
 
     scope = MemoryScope(user_id="alice", agent_id="support", namespace={"env": "prod"})
     job = await container.dream_service.request_synthesis(scope, requested_by="test")
@@ -240,8 +240,8 @@ async def test_a_job_rebuilds_its_full_scope_not_just_the_triple(container):
 
 async def test_a_job_is_not_readable_from_a_neighbouring_namespace(container):
     """The triple comparison would let these two see each other's jobs."""
-    from app.core.exceptions import JobNotFoundError
-    from app.models.scope import MemoryScope
+    from memdream.engine.core.exceptions import JobNotFoundError
+    from memdream.engine.models.scope import MemoryScope
 
     prod = MemoryScope(user_id="alice", namespace={"env": "prod"})
     staging = MemoryScope(user_id="alice", namespace={"env": "staging"})

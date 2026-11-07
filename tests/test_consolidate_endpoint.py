@@ -20,9 +20,9 @@ from datetime import timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.main import create_app
-from app.models.enums import MemoryStatus, TemporalNature
-from app.models.memory import Memory, utcnow
+from memdream.engine.main import create_app
+from memdream.engine.models.enums import MemoryStatus, TemporalNature
+from memdream.engine.models.memory import Memory, utcnow
 
 pytestmark = pytest.mark.asyncio
 

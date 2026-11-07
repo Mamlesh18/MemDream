@@ -25,8 +25,8 @@ import os
 import pytest
 from pymongo import ASCENDING, IndexModel
 
-from app.models.scope import MemoryScope
-from app.repositories.mongo.database import _normalise_key, _sync_indexes
+from memdream.engine.models.scope import MemoryScope
+from memdream.engine.repositories.mongo.database import _normalise_key, _sync_indexes
 from scripts.migrate_scope_key import migrate_collection, scope_key_for
 
 requires_real_mongo = pytest.mark.skipif(

@@ -270,7 +270,7 @@ each. `GET /v1/metrics/tokens` shows what yours actually cost per operation.
 
 ```python
 from mongomock_motor import AsyncMongoMockClient
-from app.repositories.mongo import MongoDatabase
+from memdream.engine.repositories.mongo import MongoDatabase
 from memdream import MemDream
 
 mem = MemDream(

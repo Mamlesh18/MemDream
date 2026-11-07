@@ -66,9 +66,9 @@ from memdream.models import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance only
-    from app.container import DreamContainer
-    from app.core.config import Settings
-    from app.models.scope import MemoryScope
+    from memdream.engine.container import DreamContainer
+    from memdream.engine.core.config import Settings
+    from memdream.engine.models.scope import MemoryScope
 
 
 def _require_core() -> None:
@@ -77,10 +77,10 @@ def _require_core() -> None:
     `DreamClient` needs only `httpx`, so it is reasonable to vendor the client
     module alone next to an agent framework. Anyone who does that and then
     reaches for `MemDream` should be told what is missing, not shown a traceback
-    about `app.container` — a module they never heard of and did not import.
+    about `memdream.engine.container` — a module they never heard of and did not import.
     """
     try:
-        import app.container  # noqa: F401
+        import memdream.engine.container  # noqa: F401
     except ImportError as exc:  # pragma: no cover - depends on install shape
         raise ImportError(
             "The embedded MemDream runs the engine in your process, so it needs "
@@ -201,9 +201,9 @@ class AsyncMemDream:
 
         async with self._lock:
             if self._container is None:
-                from app.container import DreamContainer
-                from app.core.config import Settings, get_settings
-                from app.core.shorthand import expand
+                from memdream.engine.container import DreamContainer
+                from memdream.engine.core.config import Settings, get_settings
+                from memdream.engine.core.shorthand import expand
 
                 # `llm="openai:gpt-4o-mini"` and friends become the settings
                 # fields that provider actually reads; everything else passes
@@ -213,7 +213,7 @@ class AsyncMemDream:
                 # Quiet by default: a library should not print INFO lines into
                 # the program that imported it. `log_level="INFO"` turns them on.
                 if self._owns_container:
-                    from app.core.logging import configure_library_logging
+                    from memdream.engine.core.logging import configure_library_logging
 
                     configure_library_logging(
                         self._overrides.get("log_level")
@@ -231,7 +231,7 @@ class AsyncMemDream:
                 if self._in_memory:
                     from mongomock_motor import AsyncMongoMockClient
 
-                    from app.repositories.mongo import MongoDatabase
+                    from memdream.engine.repositories.mongo import MongoDatabase
 
                     database = MongoDatabase(
                         AsyncMongoMockClient(tz_aware=True), settings.mongodb_database
@@ -243,7 +243,7 @@ class AsyncMemDream:
                 # user would get synthesis (triggered by writes) but never the
                 # pass that retires memories whose validity has run out.
                 if self._auto_dream and self._owns_container and container.scheduler is None:
-                    from app.dream.scheduler import ConsolidationScheduler
+                    from memdream.engine.dream.scheduler import ConsolidationScheduler
 
                     container.scheduler = ConsolidationScheduler(container, settings)
                     container.scheduler.start()
@@ -290,7 +290,7 @@ class AsyncMemDream:
         `clinet_id` quietly dropped would read from a different partition than
         the caller named.
         """
-        from app.core.identity import build_scope
+        from memdream.engine.core.identity import build_scope
 
         unknown = set(kwargs) - {
             "user_id", "phone_number", "agent_id", "client_id", "namespace", "bot_id"
@@ -533,7 +533,7 @@ class AsyncMemDream:
         which is the payoff for keeping superseded memories instead of deleting
         them.
         """
-        from app.models.requests import SearchMemoryRequest
+        from memdream.engine.models.requests import SearchMemoryRequest
 
         container = await self.start()
         scope = await self._scope(scope_kwargs)
@@ -593,7 +593,7 @@ class AsyncMemDream:
         **scope_kwargs: Any,
     ) -> list[MemoryRecord]:
         """Browse without a semantic query. Active memories only by default."""
-        from app.models.enums import MemoryStatus
+        from memdream.engine.models.enums import MemoryStatus
 
         container = await self.start()
         scope = await self._scope(scope_kwargs)
@@ -749,7 +749,7 @@ class AsyncMemDream:
         Every override applies to this call only and never changes what the
         nightly pass does. Decay needs `recall_epoch` before it can fire at all.
         """
-        from app.dream.consolidation import run_consolidation_pass
+        from memdream.engine.dream.consolidation import run_consolidation_pass
 
         container = await self.start()
         scope = await self._scope(scope_kwargs)
@@ -920,7 +920,7 @@ def _translate(exc: Exception) -> Exception:
     """
     from pydantic import ValidationError as PydanticValidationError
 
-    from app.core.exceptions import DreamError as EngineError
+    from memdream.engine.core.exceptions import DreamError as EngineError
     from memdream.exceptions import DreamError, error_for
 
     if isinstance(exc, DreamError):

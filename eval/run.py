@@ -150,7 +150,7 @@ class Harness:
         self._settings = self._build_settings()
 
     def _build_settings(self):
-        from app.core.config import Settings
+        from memdream.engine.core.config import Settings
 
         overrides: dict[str, Any] = {
             "env": "eval",
@@ -189,10 +189,10 @@ class Harness:
         """A container with a private, empty store."""
         from mongomock_motor import AsyncMongoMockClient
 
-        from app.container import DreamContainer
-        from app.providers.queue.inline_queue import InlineJobQueue
-        from app.providers.vector_store.memory_store import InMemoryVectorStore
-        from app.repositories.mongo import MongoDatabase
+        from memdream.engine.container import DreamContainer
+        from memdream.engine.providers.queue.inline_queue import InlineJobQueue
+        from memdream.engine.providers.vector_store.memory_store import InMemoryVectorStore
+        from memdream.engine.repositories.mongo import MongoDatabase
 
         database = MongoDatabase(AsyncMongoMockClient(tz_aware=True), "memdream_eval")
         return await DreamContainer.create(
@@ -205,13 +205,13 @@ class Harness:
 
     @staticmethod
     def _scope():
-        from app.models.scope import MemoryScope
+        from memdream.engine.models.scope import MemoryScope
 
         return MemoryScope(client_id="eval_client", bot_id="eval_bot", user_id="eval_user")
 
     async def _seed(self, container, scope, entries: list[dict[str, Any]]):
         """Persist the case's pre-existing memories, in order."""
-        from app.models.memory import Memory
+        from memdream.engine.models.memory import Memory
 
         stored = []
         for entry in entries:
@@ -227,7 +227,7 @@ class Harness:
                 confidence=extra.get("confidence", 0.9),
             )
             if "temporalNature" in extra:
-                from app.models.enums import TemporalNature
+                from memdream.engine.models.enums import TemporalNature
 
                 memory.temporal_nature = TemporalNature(extra["temporalNature"])
             memory.embedding = await container.embeddings.embed(content)
@@ -239,7 +239,7 @@ class Harness:
     # --- decision suites ---------------------------------------------------- #
 
     async def run_decision_case(self, suite: str, case: dict[str, Any]) -> CaseResult:
-        from app.models.dream import ExtractedMemory
+        from memdream.engine.models.dream import ExtractedMemory
 
         container = await self._container()
         scope = self._scope()
@@ -317,7 +317,7 @@ class Harness:
 
             # A case may declare patterns that already exist, to test idempotency.
             for existing in case.get("existingPatterns", []):
-                from app.models.memory import Memory, new_memory_id
+                from memdream.engine.models.memory import Memory, new_memory_id
 
                 pattern = Memory(
                     memory_id=new_memory_id("pattern"),
@@ -485,7 +485,7 @@ def write_report(results: list[SuiteResult], path: Path, provider: str, mode: st
 
 
 async def _run(args: argparse.Namespace) -> int:
-    from app.core.logging import configure_logging
+    from memdream.engine.core.logging import configure_logging
 
     # Quiet by default: 250 cases each emitting activation logs buries the report.
     configure_logging("DEBUG" if args.verbose else "ERROR", json_output=False)

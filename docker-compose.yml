@@ -61,7 +61,7 @@ services:
   #
   #   worker:
   #     build: .
-  #     command: ["python", "-m", "app.workers.synthesis_worker"]
+  #     command: ["python", "-m", "memdream.engine.workers.synthesis_worker"]
   #     env_file: [.env]
   #     environment:
   #       DREAM_MONGODB_URI: mongodb://mongo:27017
