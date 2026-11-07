@@ -14,7 +14,9 @@ import re
 from pathlib import Path
 
 import pytest
-import tomllib
+
+# tomllib is 3.11+. Checking two files agree needs to run on one version, not all.
+tomllib = pytest.importorskip("tomllib")
 
 ROOT = Path(__file__).resolve().parents[1]
 
