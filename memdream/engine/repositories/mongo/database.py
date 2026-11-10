@@ -236,9 +236,14 @@ class MongoDatabase(Database):
         self._client.close()
 
     async def drop_everything(self) -> None:
-        """Test helper. Never invoked by the service."""
+        """Test helper. Never invoked by the service.
+
+        Drops the collections rather than emptying them, so their indexes go too
+        — otherwise a test that sets up a legacy index finds the previous test's
+        modern one already there.
+        """
         for name in (MEMORIES, RELATIONS, OPERATIONS, JOBS):
-            await self._db[name].delete_many({})
+            await self._db.drop_collection(name)
 
 
 _database: MongoDatabase | None = None

@@ -17,6 +17,7 @@ is the guard on that promise.
 from __future__ import annotations
 
 import inspect
+import os
 
 import pytest
 
@@ -284,14 +285,37 @@ async def test_async_context_manager_starts_and_closes(container):
 # --------------------------------------------------------------------------- #
 
 
-def test_the_sync_facade_needs_no_asyncio_from_the_caller(container):
+@pytest.fixture
+def own_database(settings):
+    """Arguments for a sync facade that builds its container on its own loop.
+
+    Not the `container` fixture: that one is built on pytest's loop, and a real
+    database driver binds its connections to the loop that created them. A
+    sync `MemDream` opens its own, which is what real code does — and against a
+    real MongoDB it is what these tests exist to check.
+    """
+    uri = os.environ.get("DREAM_TEST_MONGODB_URI")
+    if not uri:
+        yield {"settings": settings, "database": "memory"}
+        return
+
+    name = "memdream_test_sync"
+    yield {"settings": settings, "database": f"{uri.rstrip('/')}/{name}"}
+
+    from pymongo import MongoClient
+
+    with MongoClient(uri) as client:
+        client.drop_database(name)
+
+
+def test_the_sync_facade_needs_no_asyncio_from_the_caller(own_database):
     """The whole point: a script, a notebook or a Django view can use MemDream
     without knowing the core is async.
 
     Note this is a plain `def` — there is no event loop in this test at all.
     The facade runs one of its own on a background thread.
     """
-    mem = MemDream(user_id="alice", container=container)
+    mem = MemDream(user_id="alice", **own_database)
     try:
         result = mem.add("I moved to Bangalore.")
         assert result.remembered
@@ -302,11 +326,11 @@ def test_the_sync_facade_needs_no_asyncio_from_the_caller(container):
         mem.close()
 
 
-def test_the_sync_facade_survives_more_than_one_call(container):
+def test_the_sync_facade_survives_more_than_one_call(own_database):
     """`asyncio.run` per call would pass a single-call test and fail here: the
     database driver binds its pool to the loop that created it, so the second
     call would find it attached to a loop that no longer exists."""
-    with MemDream(user_id="alice", container=container) as mem:
+    with MemDream(user_id="alice", **own_database) as mem:
         mem.add("I live in Chennai.")
         mem.add("I moved to Bangalore.")
         mem.create("User speaks Tamil.")
