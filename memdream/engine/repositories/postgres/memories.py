@@ -202,11 +202,14 @@ class PostgresMemoryRepository(MemoryRepository):
                 # jsonb_set is a genuine partial update: two operations writing
                 # different metadata keys cannot clobber each other, which a
                 # read-modify-write of the whole object would allow.
+                # The value is typed `::jsonb` (the pool's codec JSON-encodes it):
+                # `to_jsonb($n)` takes any type, so Postgres cannot type an
+                # untyped parameter and refuses the statement.
                 placeholder = where.bind(value)
                 path = where.bind([nested])
                 assignments.append(
                     f"{column} = jsonb_set(COALESCE({column}, '{{}}'::jsonb), "
-                    f"{path}::text[], to_jsonb({placeholder}), true)"
+                    f"{path}::text[], {placeholder}::jsonb, true)"
                 )
             else:
                 assignments.append(f"{column} = {where.bind(value)}")
@@ -325,7 +328,7 @@ class PostgresMemoryRepository(MemoryRepository):
                 path = where.bind([nested])
                 assignments.append(
                     f"{column} = jsonb_set(COALESCE({column}, '{{}}'::jsonb), "
-                    f"{path}::text[], to_jsonb({placeholder}), true)"
+                    f"{path}::text[], {placeholder}::jsonb, true)"
                 )
             else:
                 assignments.append(f"{column} = {where.bind(value)}")

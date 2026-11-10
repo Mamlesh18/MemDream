@@ -11,6 +11,7 @@ Three promises the README makes to someone adding MemDream to their project:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -118,3 +119,82 @@ def test_delete_leaves_no_trace_of_the_content_in_the_audit_log():
         delete_rows = [row for row in rows if row["action"] == "DELETE"]
         assert delete_rows and delete_rows[0]["inputContent"] is None
         assert kept.memory_id
+
+
+# --------------------------------------------------------------------------- #
+# The same promises on PostgreSQL as the canonical store
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def postgres():
+    """Library arguments for a real PostgreSQL, or skip.
+
+    Everything else in the suite runs on the Mongo repositories; without this,
+    the Postgres memories, audit and job repositories had no test at all.
+    """
+    dsn = os.environ.get("DREAM_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip("set DREAM_TEST_POSTGRES_DSN to run the library against PostgreSQL")
+    pytest.importorskip("asyncpg", reason="asyncpg not installed")
+    yield {**OFFLINE, "database": dsn, "vector": "memory"}
+    _drop_postgres_tables(dsn)
+
+
+def _drop_postgres_tables(dsn: str) -> None:
+    import asyncio
+
+    import asyncpg
+
+    from memdream.engine.repositories.postgres.database import (
+        JOBS,
+        MEMORIES,
+        OPERATIONS,
+        RELATIONS,
+    )
+
+    async def drop() -> None:
+        connection = await asyncpg.connect(dsn)
+        try:
+            for table in (RELATIONS, OPERATIONS, JOBS, MEMORIES):
+                await connection.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+        finally:
+            await connection.close()
+
+    asyncio.run(drop())
+
+
+def test_postgres_remembers_supersedes_and_recalls(postgres):
+    with MemDream(user_id="alice", **postgres) as mem:
+        first = mem.add("I live in Chennai.")
+        second = mem.add("I moved to Bangalore.")
+        assert first.action == "ADD"
+        assert second.action == "SUPERSEDE"
+        assert second.superseded_memory_ids == [first.memory_id]
+
+        active = [m.content for m in mem.list()]
+        assert any("Bangalore" in c for c in active)
+        assert not any("Chennai" in c for c in active)
+        # History survives on Postgres too.
+        assert [m.status for m in mem.history(second.memory_id)] == ["active", "superseded"]
+
+
+def test_postgres_delete_redacts_the_audit_log(postgres):
+    with MemDream(user_id="alice", **postgres) as mem:
+        gone = mem.add("I live in Chennai.", raw=True)
+        mem.add("I am allergic to peanuts.", raw=True)
+
+        mem.delete(gone.memory_id)
+
+        dumped = repr(mem.audit())
+        assert "Chennai" not in dumped
+        assert "peanuts" in dumped
+        with pytest.raises(DreamNotFoundError):
+            mem.get(gone.memory_id)
+
+
+def test_postgres_isolates_users(postgres):
+    with MemDream(user_id="alice", **postgres) as mem:
+        mem.create("User is allergic to peanuts.")
+        assert mem.list(user_id="bob") == []
+        assert len(mem.list()) == 1
