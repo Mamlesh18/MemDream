@@ -84,6 +84,11 @@ class DreamContainer:
     #: did not ask for.
     scheduler: ConsolidationScheduler | None = None
 
+    #: Components the caller passed in rather than letting `create` build them.
+    #: They belong to the caller, so `close` leaves them open — closing a
+    #: database connection the host application still uses would break it.
+    borrowed: frozenset[str] = frozenset()
+
     @classmethod
     async def create(
         cls,
@@ -102,6 +107,17 @@ class DreamContainer:
         touching environment variables or monkeypatching factories.
         """
         settings = settings or get_settings()
+        borrowed = frozenset(
+            name
+            for name, given in (
+                ("database", database),
+                ("embeddings", embeddings),
+                ("llm", llm),
+                ("vectors", vectors),
+                ("queue", queue),
+            )
+            if given is not None
+        )
 
         if settings.otel_enabled and metrics.enable_otel(settings.service_name):
             logger.info("otel_metrics_enabled")
@@ -205,6 +221,7 @@ class DreamContainer:
             compaction=compaction,
             memory_service=memory_service,
             dream_service=dream_service,
+            borrowed=borrowed,
         )
 
         # The embedded queue runs jobs through the service that owns it, so the
@@ -284,6 +301,8 @@ class DreamContainer:
         in-flight synthesis, and a draining job still needs the database and the
         LLM client. Closing the database first would fail every job that was
         about to finish.
+
+        Components passed to `create` are the caller's and are left open.
         """
         for name, closer in (
             ("queue", self.queue.close),
@@ -292,6 +311,8 @@ class DreamContainer:
             ("embeddings", self.embeddings.close),
             ("database", self.database.close),
         ):
+            if name in self.borrowed:
+                continue
             try:
                 await closer()
             except Exception as exc:  # noqa: BLE001

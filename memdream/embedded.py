@@ -164,6 +164,7 @@ class AsyncMemDream:
             overrides = {**overrides, "database": database}
             database = None
         self._auto_dream = auto_dream
+        self._built_database: Any = None
 
         self._settings = settings
         self._overrides = overrides
@@ -236,6 +237,9 @@ class AsyncMemDream:
                     database = MongoDatabase(
                         AsyncMongoMockClient(tz_aware=True), settings.mongodb_database
                     )
+                    # Ours, not the caller's: the container treats a passed-in
+                    # database as borrowed, so closing it is our job.
+                    self._built_database = database
 
                 container = await DreamContainer.create(settings, database=database)
 
@@ -257,6 +261,9 @@ class AsyncMemDream:
                 await self._container.scheduler.stop()
                 self._container.scheduler = None
             await self._container.close()
+            if self._built_database is not None:
+                await self._built_database.close()
+                self._built_database = None
         self._container = None
 
     async def __aenter__(self) -> AsyncMemDream:
