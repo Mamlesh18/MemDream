@@ -91,6 +91,11 @@ packages = ["memdream"]
 [tool.hatch.build.targets.wheel.force-include]
 "prompts" = "memdream/templates/prompts"
 
+# The source archive is for building and testing the package, not for repo
+# tooling: editor/agent config and CI definitions stay on GitHub.
+[tool.hatch.build.targets.sdist]
+exclude = [".claude", ".github", "data"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
