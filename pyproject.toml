@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memdream"
-version = "0.1.0"
+version = "0.1.1"
 description = "MemDream - a self-maintaining long-term memory layer for AI agents: recall, remember, and dream (supersede / merge / synthesise)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -44,7 +45,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Vector backends. Each is lazily imported, so installing one costs nothing for
-# the others: pip install "memdream[qdrant] @ git+https://github.com/Mamlesh18/MemDream.git"
+# the others: pip install "memdream[qdrant]"
 qdrant = ["qdrant-client>=1.9"]
 pgvector = ["asyncpg>=0.29"]
 # The canonical store on Postgres. Same driver as the pgvector backend, so
@@ -80,9 +81,6 @@ dev = [
 Homepage = "https://github.com/Mamlesh18/MemDream"
 Documentation = "https://github.com/Mamlesh18/MemDream/tree/main/docs"
 Issues = "https://github.com/Mamlesh18/MemDream/issues"
-
-[project.scripts]
-memdream-eval = "eval.run:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["memdream"]

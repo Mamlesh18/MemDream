@@ -51,21 +51,19 @@ lifecycle explain most of what the methods below do.
 
 ## Install
 
-MemDream is installed from GitHub:
-
 ```bash
-pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git@v0.1.0"
+pip install memdream
 ```
 
-Pin a release tag; without one you get whatever is on `main`. See the
+Pin a version (`memdream==0.1.1`) in anything that matters. See the
 [changelog](../CHANGELOG.md).
 
 With optional providers:
 
 ```bash
-pip install "memdream[gemini] @ git+https://github.com/Mamlesh18/MemDream.git"       # Google Gemini
-pip install "memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git"    # Claude
-pip install "memdream[postgres] @ git+https://github.com/Mamlesh18/MemDream.git"     # PostgreSQL
+pip install "memdream[gemini]"       # Google Gemini
+pip install "memdream[anthropic]"    # Claude
+pip install "memdream[postgres]"     # PostgreSQL
 ```
 
 Python 3.10 or newer. OpenAI, Azure OpenAI, Ollama, Together and Fireworks

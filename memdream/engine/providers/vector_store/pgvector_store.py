@@ -1,6 +1,6 @@
 """PostgreSQL + pgvector.
 
-    pip install 'memdream[pgvector] @ git+https://github.com/Mamlesh18/MemDream.git'
+    pip install 'memdream[pgvector]'
 
 The pragmatic choice for anyone who already runs Postgres: no new service, and
 the tenancy filter is an ordinary indexed WHERE clause rather than a bolt-on.
@@ -49,7 +49,7 @@ class PgVectorStore(VectorStore):
             import asyncpg  # noqa: F401
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError(
-                "asyncpg is required. Install with: pip install 'memdream[pgvector] @ git+https://github.com/Mamlesh18/MemDream.git'"
+                "asyncpg is required. Install with: pip install 'memdream[pgvector]'"
             ) from exc
 
         self._dsn = dsn

@@ -85,7 +85,7 @@ def _require_core() -> None:
         raise ImportError(
             "The embedded MemDream runs the engine in your process, so it needs "
             "the whole package: "
-            "pip install 'memdream @ git+https://github.com/Mamlesh18/MemDream.git'\n"
+            "pip install memdream\n"
             "To talk to a MemDream server over HTTP instead, use DreamClient, "
             "which needs only httpx."
         ) from exc

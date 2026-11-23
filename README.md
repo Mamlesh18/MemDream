@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="MemDream" width="720" />
+<img src="https://raw.githubusercontent.com/Mamlesh18/MemDream/main/assets/banner.png" alt="MemDream" width="720" />
 
 # MemDream
 
 **A Python library that gives your AI agent long-term memory that maintains itself.**
 
 [![CI](https://github.com/Mamlesh18/MemDream/actions/workflows/ci.yml/badge.svg)](https://github.com/Mamlesh18/MemDream/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/Mamlesh18/MemDream/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Mamlesh18/MemDream/blob/main/CONTRIBUTING.md)
 
 [Install](#install) · [Quick start](#quick-start) · [The whole API](#the-whole-api) · [Dream](#dream-runs-on-its-own) · [Your prompts](#write-your-own-prompts) · [How it works](#how-it-works)
 
@@ -46,21 +46,20 @@ true. You do not have to schedule anything.
 
 ## Install
 
-MemDream is installed from GitHub (it is not on PyPI):
-
 ```bash
-pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git@v0.1.0"
+pip install memdream
 ```
-
-Pin a release tag (as above) in anything that matters; without `@v0.1.0` you get
-whatever is on `main` today. Releases and upgrade notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 Add extras for the providers you use:
 
 ```bash
-pip install "memdream[anthropic] @ git+https://github.com/Mamlesh18/MemDream.git"           # Claude
-pip install "memdream[gemini,postgres] @ git+https://github.com/Mamlesh18/MemDream.git"     # several at once
+pip install "memdream[anthropic]"          # Claude
+pip install "memdream[gemini,postgres]"    # several at once
 ```
+
+Pin a version (`memdream==0.1.1`) in anything that matters. Releases and upgrade
+notes: [`CHANGELOG.md`](https://github.com/Mamlesh18/MemDream/blob/main/CHANGELOG.md). The latest unreleased code:
+`pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git"`.
 
 Python 3.10+. OpenAI, Azure OpenAI, Ollama, Together and Fireworks need no extra.
 
@@ -172,7 +171,7 @@ mem.consolidate()              # dry run: what would be retired, changing nothin
 mem.consolidate(dry_run=False) # do it
 ```
 
-Full reference, every argument: [`docs/sdk.md`](docs/sdk.md).
+Full reference, every argument: [`docs/sdk.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/sdk.md).
 
 ### In an agent turn loop
 
@@ -189,9 +188,9 @@ becomes context for answering itself. In a web server, use `AsyncMemDream` (the
 same methods, awaited) and do the `add` in the background so the user is not
 waiting on it.
 
-Working examples: [`examples/custom_agent.py`](examples/custom_agent.py) (any
-framework) · [`examples/semantic_kernel_agent.py`](examples/semantic_kernel_agent.py)
-(Semantic Kernel) · [`examples/embedded.py`](examples/embedded.py).
+Working examples: [`examples/custom_agent.py`](https://github.com/Mamlesh18/MemDream/blob/main/examples/custom_agent.py) (any
+framework) · [`examples/semantic_kernel_agent.py`](https://github.com/Mamlesh18/MemDream/blob/main/examples/semantic_kernel_agent.py)
+(Semantic Kernel) · [`examples/embedded.py`](https://github.com/Mamlesh18/MemDream/blob/main/examples/embedded.py).
 
 **Create one `MemDream` per process and reuse it** — it holds the database and
 model connections. Close it on shutdown (`mem.close()`, or use `with MemDream(...) as mem:`).
@@ -219,7 +218,7 @@ Turn it off and call `synthesize()` / `consolidate()` yourself instead:
 mem = MemDream(user_id="alice", ..., auto_dream=False)
 ```
 
-Every threshold above is configurable — see [`config/dream.yaml`](config/dream.yaml).
+Every threshold above is configurable — see [`config/dream.yaml`](https://github.com/Mamlesh18/MemDream/blob/main/config/dream.yaml).
 
 ---
 
@@ -279,7 +278,7 @@ input → output pairs are worth a paragraph of prose. `{domain}` is replaced wi
 your `DREAM_DOMAIN` sentence.
 
 Full guide — what each prompt receives, what it must return, how to test a
-change: [`docs/prompts.md`](docs/prompts.md).
+change: [`docs/prompts.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/prompts.md).
 
 ---
 
@@ -310,7 +309,7 @@ Ollama gives a fully local setup with no key and no per-token cost.
 
 The same settings can come from environment variables instead of code
 (`DREAM_LLM_PROVIDER=openai`, `DREAM_DATABASE_PROVIDER=postgres`, …), and every
-tuning threshold lives in [`config/dream.yaml`](config/dream.yaml). The database
+tuning threshold lives in [`config/dream.yaml`](https://github.com/Mamlesh18/MemDream/blob/main/config/dream.yaml). The database
 is the source of truth; the vector index is derived from it and can be rebuilt
 at any time with `scripts/rebuild_index.py`.
 
@@ -322,7 +321,7 @@ model — `python -m scripts.calibrate` — rather than guessing.
 ## How it works
 
 <div align="center">
-<img src="assets/how-it-works.png" alt="How MemDream works" width="820" />
+<img src="https://raw.githubusercontent.com/Mamlesh18/MemDream/main/assets/how-it-works.png" alt="How MemDream works" width="820" />
 </div>
 
 On `add()`, the cheap deterministic checks run first and the model runs last, on
@@ -385,8 +384,8 @@ live in their own partition.
 nothing remembered?"* is the question you will actually have, and `mem.audit()`
 answers it.
 
-More: [`docs/concepts.md`](docs/concepts.md) · [`docs/how-it-works.md`](docs/how-it-works.md) ·
-[`docs/diagrams.md`](docs/diagrams.md) · [`docs/architecture.md`](docs/architecture.md)
+More: [`docs/concepts.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/concepts.md) · [`docs/how-it-works.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/how-it-works.md) ·
+[`docs/diagrams.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/diagrams.md) · [`docs/architecture.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/architecture.md)
 
 ---
 
@@ -448,7 +447,7 @@ mem = DreamClient("http://localhost:8000", user_id="alice")   # instead of MemDr
 
 `console.html` is a single-file web console for a running service: live
 decisions, memory inspector, audit trail and token costs. Deployment, scaling and
-the REST endpoints: [`docs/self-hosting.md`](docs/self-hosting.md) · [`docs/api.md`](docs/api.md).
+the REST endpoints: [`docs/self-hosting.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/self-hosting.md) · [`docs/api.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/api.md).
 
 ---
 
@@ -456,15 +455,15 @@ the REST endpoints: [`docs/self-hosting.md`](docs/self-hosting.md) · [`docs/api
 
 | | |
 |---|---|
-| [`docs/sdk.md`](docs/sdk.md) | Every method and argument — start here |
-| [`docs/prompts.md`](docs/prompts.md) | Writing your own prompts |
-| [`docs/concepts.md`](docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream |
-| [`config/dream.yaml`](config/dream.yaml) | Every tunable, annotated |
-| [`examples/`](examples/) | Runnable integrations |
-| [`docs/how-it-works.md`](docs/how-it-works.md) | Technical walkthrough with code references |
-| [`docs/architecture.md`](docs/architecture.md) | Why each design decision went the way it did |
-| [`docs/self-hosting.md`](docs/self-hosting.md) · [`docs/api.md`](docs/api.md) | The optional HTTP service |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
+| [`docs/sdk.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/sdk.md) | Every method and argument — start here |
+| [`docs/prompts.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/prompts.md) | Writing your own prompts |
+| [`docs/concepts.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/concepts.md) | Scope, the memory lifecycle, ranking and Dream |
+| [`config/dream.yaml`](https://github.com/Mamlesh18/MemDream/blob/main/config/dream.yaml) | Every tunable, annotated |
+| [`examples/`](https://github.com/Mamlesh18/MemDream/blob/main/examples/) | Runnable integrations |
+| [`docs/how-it-works.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/how-it-works.md) | Technical walkthrough with code references |
+| [`docs/architecture.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/architecture.md) | Why each design decision went the way it did |
+| [`docs/self-hosting.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/self-hosting.md) · [`docs/api.md`](https://github.com/Mamlesh18/MemDream/blob/main/docs/api.md) | The optional HTTP service |
+| [`CONTRIBUTING.md`](https://github.com/Mamlesh18/MemDream/blob/main/CONTRIBUTING.md) | How to contribute |
 
 ---
 
@@ -484,11 +483,11 @@ Alpha. The interfaces are settled; the tuning is not.
 
 ## Contributing
 
-Contributions are very welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md). Good
+Contributions are very welcome — see [`CONTRIBUTING.md`](https://github.com/Mamlesh18/MemDream/blob/main/CONTRIBUTING.md). Good
 first issues: a new provider adapter, starter prompts for a new vertical, or
 evaluation cases that expose a failure mode we do not handle.
 
 ## License
 
-[Apache License 2.0](LICENSE) — free for commercial and private use, with an
+[Apache License 2.0](https://github.com/Mamlesh18/MemDream/blob/main/LICENSE) — free for commercial and private use, with an
 explicit patent grant.

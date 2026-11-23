@@ -5,13 +5,29 @@ All notable changes to MemDream are recorded here. The format follows
 [Semantic Versioning](https://semver.org/) — while MemDream is `0.x`, a minor
 version may contain breaking changes, and they are always listed.
 
-Install a specific release by tag:
+Install a specific release:
 
 ```bash
-pip install "memdream @ git+https://github.com/Mamlesh18/MemDream.git@v0.1.0"
+pip install memdream==0.1.1
 ```
 
 ## [Unreleased]
+
+## [0.1.1] - 2026-11-23
+
+First release on PyPI: `pip install memdream`. No API changes from 0.1.0.
+
+### Changed
+
+- Install instructions and missing-dependency hints now use PyPI
+  (`pip install "memdream[qdrant]"`) instead of a GitHub URL.
+- README links are absolute, so they work on the PyPI project page.
+
+### Fixed
+
+- The wheel declared a `memdream-eval` command pointing at the `eval` package,
+  which is not shipped; installing created a command that always failed. The
+  evaluation harness is run from a checkout: `python -m eval.run`.
 
 ## [0.1.0] - 2026-11-07
 
@@ -65,5 +81,6 @@ First tagged release.
 - Library mode now logs warnings only, to stderr; pass `log_level="INFO"` for
   the previous detail.
 
-[Unreleased]: https://github.com/Mamlesh18/MemDream/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Mamlesh18/MemDream/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Mamlesh18/MemDream/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Mamlesh18/MemDream/releases/tag/v0.1.0
